@@ -30,24 +30,40 @@ def list_products(
             {"pid": p["id"], "oid": org_ctx.org_id}
         ).mappings().all()
 
-        applicable_price = float(p["member_price"]) if org_ctx.is_member else float(p["base_price"])
+        base_price = float(p["base_price"])
+        member_price = float(p["member_price"])
+        applicable_price = member_price if org_ctx.is_member else base_price
         results.append({
             "id": str(p["id"]),
             "name": p["name"],
+            "title": p["name"],
             "description": p["description"],
-            "base_price": float(p["base_price"]),
-            "member_price": float(p["member_price"]),
+            "category": p.get("category") or "Merch",
+            "price": base_price,
+            "basePrice": base_price,
+            "base_price": base_price,
+            "memberPrice": member_price,
+            "member_price": member_price,
             "applicable_price": applicable_price,
-            "savings": max(0.0, float(p["base_price"]) - float(p["member_price"])) if org_ctx.is_member else 0.0,
+            "savings": max(0.0, base_price - member_price) if org_ctx.is_member else 0.0,
+            "image": p["image_url"],
+            "imageUrl": p["image_url"],
             "image_url": p["image_url"],
+            "isActive": p["is_active"],
+            "is_active": p["is_active"],
             "variants": [
                 {
                     "id": str(v["id"]),
                     "sku": v["sku"],
                     "size": v["size"],
                     "color": v["color"],
+                    "stock": v["stock_quantity"],
+                    "stockQuantity": v["stock_quantity"],
                     "stock_quantity": v["stock_quantity"],
-                    "is_low_stock": v["stock_quantity"] <= v["low_stock_threshold"]
+                    "lowStockThreshold": v["low_stock_threshold"],
+                    "low_stock_threshold": v["low_stock_threshold"],
+                    "is_low_stock": v["stock_quantity"] <= v["low_stock_threshold"],
+                    "price": applicable_price
                 }
                 for v in variants
             ]
@@ -117,14 +133,50 @@ def get_product(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found.")
 
     variants = db.execute(
-        text("SELECT * FROM product_variants WHERE product_id = :pid AND organization_id = :oid"),
+        text("SELECT * FROM product_variants WHERE product_id = :pid AND organization_id = :oid ORDER BY size ASC"),
         {"pid": product_id, "oid": org_ctx.org_id}
     ).mappings().all()
 
-    applicable_price = float(p["member_price"]) if org_ctx.is_member else float(p["base_price"])
+    base_price = float(p["base_price"])
+    member_price = float(p["member_price"])
+    applicable_price = member_price if org_ctx.is_member else base_price
+
     res = dict(p)
-    res["applicable_price"] = applicable_price
-    res["variants"] = [dict(v) for v in variants]
+    res.update({
+        "id": str(p["id"]),
+        "name": p["name"],
+        "title": p["name"],
+        "description": p["description"],
+        "category": p.get("category") or "Merch",
+        "price": base_price,
+        "basePrice": base_price,
+        "base_price": base_price,
+        "memberPrice": member_price,
+        "member_price": member_price,
+        "applicable_price": applicable_price,
+        "savings": max(0.0, base_price - member_price) if org_ctx.is_member else 0.0,
+        "image": p["image_url"],
+        "imageUrl": p["image_url"],
+        "image_url": p["image_url"],
+        "isActive": p["is_active"],
+        "is_active": p["is_active"],
+        "variants": [
+            {
+                "id": str(v["id"]),
+                "sku": v["sku"],
+                "size": v["size"],
+                "color": v["color"],
+                "stock": v["stock_quantity"],
+                "stockQuantity": v["stock_quantity"],
+                "stock_quantity": v["stock_quantity"],
+                "lowStockThreshold": v["low_stock_threshold"],
+                "low_stock_threshold": v["low_stock_threshold"],
+                "is_low_stock": v["stock_quantity"] <= v["low_stock_threshold"],
+                "price": applicable_price
+            }
+            for v in variants
+        ]
+    })
     return res
 
 @router.patch("/products/{product_id}")
@@ -208,6 +260,7 @@ def adjust_variant_stock(
     return {"message": "Stock updated successfully.", "variant_id": variant_id, "stock_quantity": new_stock}
 
 @router.get("/inventory/low-stock")
+@router.get("/low-stock")
 def get_low_stock_inventory(
     org_ctx: OrgContext = Depends(require_permission("products.manage_stock")),
     db: Session = Depends(get_db)

@@ -60,17 +60,50 @@ def list_my_orders(
             {"oid": o["id"]}
         ).mappings().all()
 
+        merch_items = [i for i in items if i.get("variant_id")]
+        if not merch_items:
+            pickup_status = "NOT_APPLICABLE"
+        elif all(i.get("fulfillment_status") == "PICKED_UP" for i in merch_items):
+            pickup_status = "PICKED_UP"
+        elif any(i.get("fulfillment_status") in ("READY", "READY_FOR_PICKUP") for i in merch_items):
+            pickup_status = "READY_FOR_PICKUP"
+        elif o["status"] == "PAID":
+            pickup_status = "READY_FOR_PICKUP"
+        else:
+            pickup_status = "PENDING"
+
+        formatted_items = []
+        for i in items:
+            title = i["product_name"] or i["ticket_name"] or i["plan_name"] or "Item"
+            formatted_items.append({
+                **dict(i),
+                "title": title,
+                "name": title,
+                "quantity": i["quantity"],
+                "unitPrice": float(i["unit_price"]),
+                "unit_price": float(i["unit_price"]),
+                "totalPrice": float(i["unit_price"]) * i["quantity"],
+                "fulfillmentStatus": i["fulfillment_status"],
+                "fulfillment_status": i["fulfillment_status"],
+            })
+
         results.append({
             "id": str(o["id"]),
             "order_number": o["order_number"],
+            "orderNumber": o["order_number"],
             "order_type": o["order_type"],
+            "type": o["order_type"],
             "status": o["status"],
             "subtotal": float(o["subtotal"]),
             "discount_total": float(o["discount_total"]),
             "total": float(o["total"]),
+            "totalAmount": float(o["total"]),
+            "pickup_status": pickup_status,
+            "pickupStatus": pickup_status,
             "expires_at": str(o["expires_at"]),
             "created_at": str(o["created_at"]),
-            "items": [dict(i) for i in items]
+            "createdAt": str(o["created_at"]),
+            "items": formatted_items
         })
     return results
 
@@ -192,17 +225,50 @@ def get_order_detail(
         {"oid": order["id"]}
     ).mappings().all()
 
+    merch_items = [i for i in items if i.get("variant_id")]
+    if not merch_items:
+        pickup_status = "NOT_APPLICABLE"
+    elif all(i.get("fulfillment_status") == "PICKED_UP" for i in merch_items):
+        pickup_status = "PICKED_UP"
+    elif any(i.get("fulfillment_status") in ("READY", "READY_FOR_PICKUP") for i in merch_items):
+        pickup_status = "READY_FOR_PICKUP"
+    elif order["status"] == "PAID":
+        pickup_status = "READY_FOR_PICKUP"
+    else:
+        pickup_status = "PENDING"
+
+    formatted_items = []
+    for i in items:
+        title = i["product_name"] or i["ticket_name"] or i["plan_name"] or "Item"
+        formatted_items.append({
+            **dict(i),
+            "title": title,
+            "name": title,
+            "quantity": i["quantity"],
+            "unitPrice": float(i["unit_price"]),
+            "unit_price": float(i["unit_price"]),
+            "totalPrice": float(i["unit_price"]) * i["quantity"],
+            "fulfillmentStatus": i["fulfillment_status"],
+            "fulfillment_status": i["fulfillment_status"],
+        })
+
     return {
         "id": str(order["id"]),
         "order_number": order["order_number"],
+        "orderNumber": order["order_number"],
         "order_type": order["order_type"],
+        "type": order["order_type"],
         "status": order["status"],
         "subtotal": float(order["subtotal"]),
         "discount_total": float(order["discount_total"]),
         "total": float(order["total"]),
+        "totalAmount": float(order["total"]),
+        "pickup_status": pickup_status,
+        "pickupStatus": pickup_status,
         "expires_at": str(order["expires_at"]),
         "created_at": str(order["created_at"]),
-        "items": [dict(i) for i in items],
+        "createdAt": str(order["created_at"]),
+        "items": formatted_items,
         "payments": [dict(p) for p in payments]
     }
 

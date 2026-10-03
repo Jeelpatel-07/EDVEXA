@@ -34,7 +34,25 @@ def list_announcements(
 
     query += " ORDER BY a.is_pinned DESC, a.publish_at DESC"
     rows = db.execute(text(query), params).mappings().all()
-    return [dict(r) for r in rows]
+    results = []
+    for r in rows:
+        d = dict(r)
+        pub_date = r["published_at"] or r["publish_at"] or r["created_at"]
+        d.update({
+            "id": str(r["id"]),
+            "author": r.get("author_name") or "Administrator",
+            "authorName": r.get("author_name") or "Administrator",
+            "isPinned": bool(r.get("is_pinned")),
+            "pinned": bool(r.get("is_pinned")),
+            "publishedAt": str(pub_date) if pub_date else None,
+            "publishAt": str(r["publish_at"]) if r.get("publish_at") else None,
+            "createdAt": str(r["created_at"]) if r.get("created_at") else None,
+            "date": str(pub_date) if pub_date else None,
+            "priority": "HIGH" if r.get("is_pinned") else "NORMAL",
+            "category": r.get("category") or "General"
+        })
+        results.append(d)
+    return results
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_announcement(
@@ -124,6 +142,42 @@ def update_announcement(
         db.commit()
 
     return {"message": "Announcement updated."}
+
+@router.get("/{announcement_id}")
+def get_announcement(
+    announcement_id: str,
+    org_ctx: OrgContext = Depends(get_current_org_context),
+    db: Session = Depends(get_db)
+):
+    a = db.execute(
+        text("""
+            SELECT a.*, u.full_name as author_name
+            FROM announcements a
+            JOIN users u ON u.id = a.author_id
+            WHERE a.id = :id AND a.organization_id = :oid
+        """),
+        {"id": announcement_id, "oid": org_ctx.org_id}
+    ).mappings().first()
+
+    if not a:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found.")
+
+    d = dict(a)
+    pub_date = a["published_at"] or a["publish_at"] or a["created_at"]
+    d.update({
+        "id": str(a["id"]),
+        "author": a.get("author_name") or "Administrator",
+        "authorName": a.get("author_name") or "Administrator",
+        "isPinned": bool(a.get("is_pinned")),
+        "pinned": bool(a.get("is_pinned")),
+        "publishedAt": str(pub_date) if pub_date else None,
+        "publishAt": str(a["publish_at"]) if a.get("publish_at") else None,
+        "createdAt": str(a["created_at"]) if a.get("created_at") else None,
+        "date": str(pub_date) if pub_date else None,
+        "priority": "HIGH" if a.get("is_pinned") else "NORMAL",
+        "category": a.get("category") or "General"
+    })
+    return d
 
 @router.delete("/{announcement_id}")
 def delete_announcement(

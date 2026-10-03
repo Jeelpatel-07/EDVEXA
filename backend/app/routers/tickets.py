@@ -9,6 +9,35 @@ from app.services.ticket_service import scan_ticket, refund_ticket, generate_qr_
 
 router = APIRouter(prefix="/orgs/{org_id}/tickets", tags=["Tickets & Scanning"])
 
+
+def _format_ticket(t: dict) -> dict:
+    d = dict(t)
+    price = float(t.get("price_paid", 0.0) or 0.0)
+    d.update({
+        "id": str(t["id"]),
+        "ticketId": str(t["id"]),
+        "ticketNumber": t.get("ticket_code"),
+        "ticketCode": t.get("ticket_code"),
+        "qrCode": t.get("ticket_code"),
+        "eventTitle": t.get("event_title"),
+        "eventLocation": t.get("event_location"),
+        "venue": t.get("event_location"),
+        "location": t.get("event_location"),
+        "eventDate": str(t.get("start_time")) if t.get("start_time") else None,
+        "startTime": str(t.get("start_time")) if t.get("start_time") else None,
+        "endTime": str(t.get("end_time")) if t.get("end_time") else None,
+        "ticketTypeName": t.get("ticket_type_name"),
+        "pricePaid": price,
+        "price_paid": price,
+        "holderName": t.get("holder_name") or "Pass Holder",
+        "holderEmail": t.get("holder_email") or "",
+        "status": t.get("status") or "ISSUED",
+        "checkedInAt": str(t.get("checked_in_at")) if t.get("checked_in_at") else None,
+        "createdAt": str(t.get("created_at")) if t.get("created_at") else None,
+    })
+    return d
+
+
 @router.get("/me")
 def get_my_tickets(
     current_user: dict = Depends(get_current_user),
@@ -17,19 +46,23 @@ def get_my_tickets(
 ):
     tickets = db.execute(
         text("""
-            SELECT t.*, e.title as event_title, e.location as event_location, e.start_time, e.end_time,
+            SELECT t.*, 
+                   e.title as event_title, e.location as event_location, e.start_time, e.end_time,
                    tt.name as ticket_type_name,
+                   u.full_name as holder_name, u.email as holder_email,
                    ci.checked_in_at
             FROM tickets t
             JOIN events e ON e.id = t.event_id
             JOIN ticket_types tt ON tt.id = t.ticket_type_id
+            JOIN users u ON u.id = t.user_id
             LEFT JOIN check_ins ci ON ci.ticket_id = t.id
             WHERE t.user_id = :uid AND t.organization_id = :oid
             ORDER BY e.start_time DESC
         """),
         {"uid": current_user["id"], "oid": org_ctx.org_id}
     ).mappings().all()
-    return [dict(t) for t in tickets]
+    return [_format_ticket(t) for t in tickets]
+
 
 @router.get("/{ticket_id}")
 def get_ticket_detail(
@@ -40,8 +73,10 @@ def get_ticket_detail(
 ):
     ticket = db.execute(
         text("""
-            SELECT t.*, e.title as event_title, e.location as event_location, e.start_time, e.end_time,
-                   tt.name as ticket_type_name, u.full_name as holder_name,
+            SELECT t.*, 
+                   e.title as event_title, e.location as event_location, e.start_time, e.end_time,
+                   tt.name as ticket_type_name, 
+                   u.full_name as holder_name, u.email as holder_email,
                    ci.checked_in_at
             FROM tickets t
             JOIN events e ON e.id = t.event_id
@@ -56,16 +91,26 @@ def get_ticket_detail(
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found.")
 
-    # Ownership check: must be owner OR have tickets.manage permission
-    if str(ticket["user_id"]) != str(current_user["id"]) and not org_ctx.has_permission("tickets.manage"):
+    # Ownership check: must be owner OR have tickets.manage or tickets.scan permission
+    if str(ticket["user_id"]) != str(current_user["id"]) and not (
+        org_ctx.has_permission("tickets.manage") or org_ctx.has_permission("tickets.scan")
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
-    return dict(ticket)
+    return _format_ticket(ticket)
+
 
 @router.get("/{ticket_id}/qr")
-def get_ticket_qr(ticket_id:str,current_user:dict=Depends(get_current_user),org_ctx:OrgContext=Depends(get_current_org_context),db:Session=Depends(get_db)):
-    ticket=get_ticket_detail(ticket_id,current_user,org_ctx,db)
-    return Response(content=generate_qr_png_bytes(ticket["ticket_code"]),media_type="image/png")
+@router.get("/{ticket_id}/qr.png")
+def get_ticket_qr(
+    ticket_id: str,
+    current_user: dict = Depends(get_current_user),
+    org_ctx: OrgContext = Depends(get_current_org_context),
+    db: Session = Depends(get_db)
+):
+    ticket = get_ticket_detail(ticket_id, current_user, org_ctx, db)
+    return Response(content=generate_qr_png_bytes(ticket["ticket_code"]), media_type="image/png")
+
 
 @router.post("/scan", response_model=TicketScanResponse)
 def scan_ticket_endpoint(
@@ -81,6 +126,7 @@ def scan_ticket_endpoint(
         scanner_org_id=org_ctx.org_id
     )
     return res
+
 
 @router.post("/{ticket_id}/checkin")
 def manual_checkin_endpoint(
@@ -104,6 +150,7 @@ def manual_checkin_endpoint(
         scanner_org_id=org_ctx.org_id
     )
     return res
+
 
 @router.post("/{ticket_id}/refund")
 def refund_ticket_endpoint(

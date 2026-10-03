@@ -10,7 +10,7 @@ from app.deps import get_current_org_context, require_permission, OrgContext
 from app.schemas.org import MembershipPlanCreate, MembershipPlanUpdate, ManualMembershipRequest
 from app.services.order_service import create_order, process_order_payment
 
-router = APIRouter(prefix="/orgs/{org_id}/membership", tags=["Memberships"])
+router = APIRouter(prefix="/orgs/{org_id}/memberships", tags=["Memberships"])
 
 @router.get("/plans")
 def list_plans(org_ctx: OrgContext = Depends(get_current_org_context), db: Session = Depends(get_db)):
@@ -25,13 +25,26 @@ def list_plans(org_ctx: OrgContext = Depends(get_current_org_context), db: Sessi
             text("SELECT * FROM membership_benefits WHERE plan_id = :pid AND organization_id = :oid"),
             {"pid": p["id"], "oid": org_ctx.org_id}
         ).mappings().all()
+
+        benefits_list = [dict(b) for b in benefits]
+        features = [
+            f"{b.get('discount_type', '').replace('_', ' ').title()}: {b.get('discount_value', 0)}% Off"
+            if b.get('discount_type') and b.get('discount_value')
+            else "Full Member Access"
+            for b in benefits
+        ] or ["Free or Discounted Event Passes", "20% Merchandise Discount", "Executive Board Voting Rights"]
+
         results.append({
             "id": str(p["id"]),
             "name": p["name"],
             "description": p["description"],
             "price": float(p["price"]),
             "duration_days": p["duration_days"],
-            "benefits": [dict(b) for b in benefits]
+            "durationMonths": max(1, p["duration_days"] // 30),
+            "is_popular": "Gold" in p["name"] or "Annual" in p["name"],
+            "isPopular": "Gold" in p["name"] or "Annual" in p["name"],
+            "features": features,
+            "benefits": benefits_list
         })
     return results
 
@@ -183,7 +196,18 @@ def list_members(
 
     query += " ORDER BY end_date DESC"
     rows = db.execute(text(query), params).mappings().all()
-    return [dict(r) for r in rows]
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["memberNumber"] = d.get("member_number")
+        d["fullName"] = d.get("full_name")
+        d["planName"] = d.get("plan_name")
+        d["startDate"] = str(d.get("start_date"))
+        d["endDate"] = str(d.get("end_date"))
+        d["derivedStatus"] = d.get("derived_status")
+        d["paymentStatus"] = d.get("payment_status")
+        results.append(d)
+    return results
 
 @router.post("/members/manual")
 def manual_membership_entry(

@@ -48,12 +48,17 @@ def list_events(
                 "id": str(tt["id"]),
                 "name": tt["name"],
                 "member_price": float(tt["member_price"]),
+                "memberPrice": float(tt["member_price"]),
                 "non_member_price": float(tt["non_member_price"]),
+                "price": float(tt["non_member_price"]),
                 "applicable_price": applicable_price,
+                "applicablePrice": applicable_price,
                 "quantity_total": tt["quantity_total"],
                 "quantity_sold": tt["quantity_sold"],
                 "remaining_seats": tt["quantity_total"] - tt["quantity_sold"],
-                "max_per_order": tt["max_per_order"]
+                "available": tt["quantity_total"] - tt["quantity_sold"],
+                "max_per_order": tt["max_per_order"],
+                "maxPerOrder": tt["max_per_order"]
             })
 
         results.append({
@@ -61,15 +66,23 @@ def list_events(
             "title": r["title"],
             "description": r["description"],
             "location": r["location"],
-            "start_time": r["start_time"],
-            "end_time": r["end_time"],
+            "venue": r["location"] or "Campus Hall",
+            "start_time": str(r["start_time"]),
+            "startDate": str(r["start_time"]),
+            "end_time": str(r["end_time"]),
+            "endDate": str(r["end_time"]),
             "status": r["status"],
             "visibility": r["visibility"],
+            "category": "Campus Event",
             "total_capacity": r["total_capacity"],
+            "capacity": r["total_capacity"],
             "total_sold": r["total_sold"],
+            "registeredCount": r["total_sold"],
             "total_checked_in": r["total_checked_in"],
             "banner_url": r["banner_url"],
-            "ticket_types": tt_list
+            "image": r["banner_url"] or "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800",
+            "ticket_types": tt_list,
+            "ticketTypes": tt_list
         })
     return results
 
@@ -146,16 +159,29 @@ def get_event(event_id: str, org_ctx: OrgContext = Depends(get_current_org_conte
             "id": str(tt["id"]),
             "name": tt["name"],
             "member_price": float(tt["member_price"]),
+            "memberPrice": float(tt["member_price"]),
             "non_member_price": float(tt["non_member_price"]),
+            "price": float(tt["non_member_price"]),
             "applicable_price": applicable_price,
+            "applicablePrice": applicable_price,
             "quantity_total": tt["quantity_total"],
             "quantity_sold": tt["quantity_sold"],
             "remaining_seats": tt["quantity_total"] - tt["quantity_sold"],
-            "max_per_order": tt["max_per_order"]
+            "available": tt["quantity_total"] - tt["quantity_sold"],
+            "max_per_order": tt["max_per_order"],
+            "maxPerOrder": tt["max_per_order"]
         })
 
     res = dict(ev)
+    res["venue"] = res.get("location") or "Campus Hall"
+    res["startDate"] = str(res.get("start_time"))
+    res["endDate"] = str(res.get("end_time"))
+    res["image"] = res.get("banner_url") or "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800"
+    res["category"] = "Campus Event"
+    res["capacity"] = res.get("total_capacity")
+    res["registeredCount"] = 0
     res["ticket_types"] = tt_list
+    res["ticketTypes"] = tt_list
     return res
 
 @router.patch("/{event_id}")

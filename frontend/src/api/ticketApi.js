@@ -37,6 +37,21 @@ export const ticketApi = {
       reason,
     });
   },
+
+  getCheckInStats: async (eventId) => {
+    try {
+      const res = await apiClient.get(`/orgs/${getCurrentOrgId()}/events/${eventId}/report`);
+      const checkedIn = res.total_checked_in || res.checked_in || 0;
+      const total = res.total_sold || res.sold || 1;
+      return {
+        checkedInCount: checkedIn,
+        totalTickets: total,
+        percentage: Number(res.attendance_rate || ((checkedIn / Math.max(1, total)) * 100).toFixed(1))
+      };
+    } catch {
+      return { checkedInCount: 0, totalTickets: 0, percentage: 0 };
+    }
+  },
 };
 
 export default ticketApi;

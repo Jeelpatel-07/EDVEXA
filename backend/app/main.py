@@ -135,3 +135,4 @@ def health_db():
 from app.routers import workspace,auth,platform,org_admin,membership,events,tickets,orders,store,announcements,fundraisers,finance,public
 for module in (workspace,auth,platform,org_admin,membership,events,tickets,orders,store,announcements,fundraisers,finance,public):
     app.include_router(module.router,prefix="/api/v1")
+app.include_router(fundraisers.tasks_router, prefix="/api/v1")
