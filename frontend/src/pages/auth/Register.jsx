@@ -33,6 +33,10 @@ export default function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (formData.studentId.trim() && !formData.joinCode.trim()) {
+      setError("Add an organization join code when supplying a student ID.");
+      return;
+    }
     if (!passwordsMatch) {
       setError("Passwords do not match.");
       return;
@@ -70,10 +74,10 @@ export default function Register() {
             <CheckCircle2 className="w-6 h-6" />
           </div>
           <h2 className="text-xl font-bold text-foreground">
-            Account Created Successfully!
+            Check Your Email
           </h2>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            We have generated a verification email for <strong>{formData.email}</strong>. Please check your inbox (or backend server logs in development console mode) to verify your student email.
+            If this request is eligible, a verification email will be sent to <strong>{formData.email}</strong>. Open the link in your inbox to verify your account.
           </p>
           <div className="pt-4">
             <Link

@@ -1,94 +1,115 @@
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.exceptions import RequestValidationError
+from uuid import uuid4
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-from app.config import settings
-from app.jobs.scheduler import start_scheduler, shutdown_scheduler
 
-# Routers
-from app.routers import (
-    auth, platform, org_admin, membership,
-    events, tickets, orders, store, announcements,
-    fundraisers, finance, public
+from app.api.health import router as health_router
+from app.core.config import Settings, get_settings
+from app.core.errors import register_error_handlers
+from app.core.rate_limits import build_rate_limiter
+from app.db.model_registry import load_models
+from app.db.session import (
+    build_engine,
+    build_session_factory,
 )
+from app.modules.access.router import router as access_router
+from app.modules.accounts.router import router as accounts_router
+from app.modules.sessions.router import router as sessions_router
+from app.modules.sessions.service import revoke_user_sessions
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup: Start APScheduler background jobs
-    start_scheduler()
-    yield
-    # Shutdown
-    shutdown_scheduler()
 
-app = FastAPI(
-    title="EDVEXA API",
-    description="Multi-tenant SaaS backend for collegiate student organizations, events, memberships, and treasury management.",
-    version="1.0.0",
-    lifespan=lifespan
-)
+def create_app(
+    settings: Settings | None = None,
+) -> FastAPI:
+    """Build and configure the FastAPI application."""
+    config = settings or get_settings()
 
-# CORS Middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    @asynccontextmanager
+    async def lifespan(
+        application: FastAPI,
+    ) -> AsyncIterator[None]:
+        """Initialize shared resources and release them on shutdown."""
+        load_models()
 
-# Static files for receipts and product uploads
-app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+        # Creating the engine does not connect to PostgreSQL yet.
+        engine = build_engine(config)
 
-# Standardized Error Handlers
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    code = "ERROR"
-    if exc.status_code == 401:
-        code = "UNAUTHORIZED"
-    elif exc.status_code == 403:
-        code = "FORBIDDEN"
-    elif exc.status_code == 404:
-        code = "NOT_FOUND"
-    elif exc.status_code == 422:
-        code = "UNPROCESSABLE_ENTITY"
-    elif exc.status_code == 429:
-        code = "RATE_LIMITED"
+        application.state.engine = engine
+        application.state.session_factory = build_session_factory(engine)
 
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail, "code": code}
+        try:
+            application.state.rate_limiter = build_rate_limiter(config)
+
+            try:
+                yield
+            finally:
+                application.state.rate_limiter.close()
+        finally:
+            engine.dispose()
+
+    application = FastAPI(
+        title=config.app_name,
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url=(None if config.environment == "production" else "/docs"),
+        redoc_url=(None if config.environment == "production" else "/redoc"),
+        openapi_url=(None if config.environment == "production" else "/openapi.json"),
     )
 
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    # Extract error message cleanly
-    errors = exc.errors()
-    msg = errors[0].get("msg") if errors else "Validation failed"
-    loc = " -> ".join([str(l) for l in errors[0].get("loc", [])]) if errors else ""
-    detail = f"{loc}: {msg}" if loc else msg
+    application.state.settings = config
+    application.state.revoke_user_sessions = revoke_user_sessions
 
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": detail, "code": "VALIDATION_ERROR"}
+    register_error_handlers(application)
+
+    @application.middleware("http")
+    async def request_id_middleware(
+        request: Request,
+        call_next,
+    ):
+        """Assign a request ID and add shared response headers."""
+        request.state.request_id = str(uuid4())
+
+        response = await call_next(request)
+
+        response.headers["X-Request-ID"] = request.state.request_id
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Cache-Control"] = "no-store"
+
+        return response
+
+    application.include_router(
+        health_router,
+        prefix="/api",
     )
 
-# Include API v1 Routers
-api_v1_prefix = "/api/v1"
-app.include_router(auth.router, prefix=api_v1_prefix)
-app.include_router(platform.router, prefix=api_v1_prefix)
-app.include_router(org_admin.router, prefix=api_v1_prefix)
-app.include_router(membership.router, prefix=api_v1_prefix)
-app.include_router(events.router, prefix=api_v1_prefix)
-app.include_router(tickets.router, prefix=api_v1_prefix)
-app.include_router(orders.router, prefix=api_v1_prefix)
-app.include_router(store.router, prefix=api_v1_prefix)
-app.include_router(announcements.router, prefix=api_v1_prefix)
-app.include_router(fundraisers.router, prefix=api_v1_prefix)
-app.include_router(finance.router, prefix=api_v1_prefix)
-app.include_router(public.router, prefix=api_v1_prefix)
+    application.include_router(accounts_router, prefix="/api")
+    application.include_router(sessions_router, prefix="/api")
 
-@app.get("/health")
-def health_check():
-    return {"status": "healthy", "service": "EDVEXA API"}
+    application.include_router(access_router, prefix="/api")
+
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=config.cors_origins,
+        allow_credentials=True,
+        allow_methods=[
+            "GET",
+            "POST",
+            "PATCH",
+            "PUT",
+            "DELETE",
+            "OPTIONS",
+        ],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-CSRF-Token",
+        ],
+        expose_headers=[
+            "X-Request-ID",
+            "Retry-After",
+        ],
+    )
+
+    return application

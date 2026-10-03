@@ -42,3 +42,14 @@ lerna-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+# Backend environments, test caches and private configuration
+.venv/
+.test-venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.env.*
+!.env.example
+.coverage
+htmlcov/

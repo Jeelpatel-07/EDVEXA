@@ -1,171 +1,126 @@
 import axios from "axios";
 
-const baseURL = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
+export const baseURL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+let accessToken = null;
+let currentOrgId = null;
+let refreshPromise = null;
+let generation = 0;
 
-let inMemoryAccessToken = null;
-let currentOrgId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-
-export const setAccessToken = (token) => {
-  inMemoryAccessToken = token;
-};
-
-export const getAccessToken = () => {
-  return inMemoryAccessToken;
-};
-
-export const setCurrentOrgId = (orgId) => {
-  if (orgId) {
-    currentOrgId = orgId;
-    localStorage.setItem("edvexa_org_id", orgId);
-  }
-};
-
+export const setAccessToken = (token) => { accessToken = token || null; };
+export const getAccessToken = () => accessToken;
+export const setCurrentOrgId = (id) => { currentOrgId = id || null; };
 export const getCurrentOrgId = () => {
-  if (!currentOrgId) {
-    currentOrgId = localStorage.getItem("edvexa_org_id") || "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-  }
+  if (!currentOrgId) throw new Error("Select an organization first.");
   return currentOrgId;
 };
-
-export const apiClient = axios.create({
-  baseURL,
-  withCredentials: true,
-  headers: {
-    "Content-Type": "application/json",
-  },
-  timeout: 15000,
-});
-
-let isRefreshing = false;
-let failedQueue = [];
-
-const processQueue = (error, token = null) => {
-  failedQueue.forEach((prom) => {
-    if (error) {
-      prom.reject(error);
-    } else {
-      prom.resolve(token);
-    }
-  });
-  failedQueue = [];
+export const clearSession = () => {
+  accessToken = null;
+  currentOrgId = null;
+  generation++;
+};
+export const rememberTokens = (data) => {
+  if (!data?.access_token || !data?.csrf_token) throw new Error("Invalid session response.");
+  accessToken = data.access_token;
 };
 
-// Request interceptor to attach in-memory JWT token
-apiClient.interceptors.request.use(
-  (config) => {
-    if (inMemoryAccessToken) {
-      config.headers.Authorization = `Bearer ${inMemoryAccessToken}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
+const transport = axios.create({ baseURL, withCredentials: true, timeout: 15000 });
+export const apiClient = axios.create({
+  baseURL, withCredentials: true, timeout: 15000,
+  headers: { "Content-Type": "application/json" },
+});
 
-// Response interceptor with unified error handling and single-process token refresh
+export function formatError(error) {
+  if (error.raw) return error;
+  const body = error.response?.data;
+  const result = new Error(body?.error?.message ||
+    (typeof body?.detail === "string" ? body.detail : null) ||
+    (error.response ? "Request failed. Please try again." : "Cannot connect to the server."));
+  result.status = error.response?.status;
+  result.code = body?.error?.code;
+  result.raw = error;
+  return result;
+}
+
+function sessionExpired(error) {
+  clearSession();
+  window.dispatchEvent(new CustomEvent("edvexa:unauthorized"));
+  return formatError(error);
+}
+
+// Serialize cookie rotation across tabs as well as requests within this tab.
+const cookieLock = (action) => navigator.locks
+  ? navigator.locks.request("edvexa-auth-cookie", action)
+  : action();
+
+export function refreshAccess() {
+  if (!refreshPromise) {
+    const started = generation;
+    refreshPromise = cookieLock(async () => {
+      // Obtain CSRF for the cookie that is current when this tab acquires the lock.
+      const bootstrap = await transport.get("/auth/csrf");
+      const response = await transport.post("/auth/refresh", {}, {
+        headers: { "X-CSRF-Token": bootstrap.data.csrf_token },
+      });
+      if (started !== generation) throw new Error("Session changed during refresh.");
+      rememberTokens(response.data);
+      return response.data;
+    }).catch((error) => {
+      if (error.response?.status === 401) throw sessionExpired(error);
+      throw formatError(error);
+    }).finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+}
+
+export async function loginSession(credentials) {
+  return cookieLock(async () => {
+    const response = await transport.post("/auth/login", credentials);
+    rememberTokens(response.data);
+    return response.data;
+  }).catch((error) => { throw formatError(error); });
+}
+
+export async function logoutSession() {
+  return cookieLock(async () => {
+    // A stale tab must bootstrap CSRF from the current shared cookie.
+    const bootstrap = await transport.get("/auth/csrf");
+    await transport.post("/auth/logout", {}, {
+      headers: { "X-CSRF-Token": bootstrap.data.csrf_token },
+    });
+    clearSession();
+    window.dispatchEvent(new CustomEvent("edvexa:unauthorized"));
+  }).catch((error) => {
+    if (error.response?.status === 401) { sessionExpired(error); return; }
+    throw formatError(error);
+  });
+}
+
+apiClient.interceptors.request.use((config) => {
+  if (accessToken) config.headers.Authorization = `Bearer ${accessToken}`;
+  else delete config.headers.Authorization;
+  return config;
+});
+
 apiClient.interceptors.response.use(
   (response) => response.data,
   async (error) => {
-    const originalRequest = error.config;
-    const status = error.response ? error.response.status : null;
-
-    // Handle 401 with token refresh attempt
-    if (status === 401 && originalRequest && !originalRequest._retry) {
-      const url = originalRequest.url || "";
-      if (
-        url.includes("/auth/login") ||
-        url.includes("/auth/refresh") ||
-        url.includes("/auth/register")
-      ) {
-        setAccessToken(null);
-        window.dispatchEvent(new CustomEvent("edvexa:unauthorized", {
-          detail: { message: error.response?.data?.detail || "Authentication required." }
-        }));
-        const customError = new Error(
-          error.response?.data?.detail || "Authentication required. Please log in."
-        );
-        customError.status = 401;
-        return Promise.reject(customError);
+    const request = error.config;
+    const publicAuth = ["/auth/login", "/auth/register", "/auth/verify-email",
+      "/auth/forgot-password", "/auth/reset-password", "/auth/resend-verification",
+      "/auth/accept-invite"];
+    if (error.response?.status === 401 && request && !request._retry &&
+        !publicAuth.includes(request.url)) {
+      request._retry = true;
+      // Another request may already have refreshed the token that failed here.
+      if (!accessToken || request.headers.Authorization === `Bearer ${accessToken}`) {
+        await refreshAccess();
       }
-
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        })
-          .then((token) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
-            return apiClient(originalRequest);
-          })
-          .catch((err) => Promise.reject(err));
-      }
-
-      originalRequest._retry = true;
-      isRefreshing = true;
-
-      try {
-        const res = await axios.post(
-          `${baseURL}/auth/refresh`,
-          {},
-          { withCredentials: true }
-        );
-        const newAccessToken = res.data?.access_token;
-
-        if (newAccessToken) {
-          setAccessToken(newAccessToken);
-          apiClient.defaults.headers.common.Authorization = `Bearer ${newAccessToken}`;
-          processQueue(null, newAccessToken);
-          originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
-          return apiClient(originalRequest);
-        } else {
-          throw new Error("Unable to refresh session");
-        }
-      } catch (refreshErr) {
-        processQueue(refreshErr, null);
-        setAccessToken(null);
-        window.dispatchEvent(new CustomEvent("edvexa:unauthorized", {
-          detail: { message: "Your session has expired. Please sign in again." }
-        }));
-        const customError = new Error("Your session has expired. Please sign in again.");
-        customError.status = 401;
-        return Promise.reject(customError);
-      } finally {
-        isRefreshing = false;
-      }
+      return apiClient(request);
     }
-
-    // Standard error formatting
-    let message = "A network error occurred. Please check your connection.";
-    if (error.response) {
-      const data = error.response.data;
-      switch (status) {
-        case 401:
-          message = data?.detail || "Your session has expired. Please sign in.";
-          break;
-        case 403:
-          message = data?.detail || "Access denied. You do not have permission for this section.";
-          break;
-        case 404:
-          message = data?.detail || "Requested resource was not found.";
-          break;
-        case 422:
-          const detail = data?.detail;
-          if (Array.isArray(detail)) {
-            message = detail.map((err) => `${err.loc?.slice(1).join(".")}: ${err.msg}`).join(", ");
-          } else {
-            message = detail || "Invalid input data provided.";
-          }
-          break;
-        case 500:
-          message = "Internal server error. Please try again later or contact support.";
-          break;
-        default:
-          message = data?.detail || error.message || "An unexpected error occurred.";
-      }
+    if (error.response?.status === 401 && !publicAuth.includes(request?.url)) {
+      throw sessionExpired(error);
     }
-
-    const customError = new Error(message);
-    customError.status = status;
-    customError.raw = error;
-    return Promise.reject(customError);
+    throw formatError(error);
   }
 );
 

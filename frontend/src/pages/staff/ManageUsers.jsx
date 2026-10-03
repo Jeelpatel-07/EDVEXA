@@ -25,6 +25,9 @@ import {
 export default function ManageUsers() {
   const { user: currentUser, organization, refreshSession } = useAuth();
   const [users, setUsers] = useState([]);
+  const [terms, setTerms] = useState([]);
+  const [termError, setTermError] = useState("");
+  const [termForm, setTermForm] = useState({ name: "", starts_on: "", ends_on: "" });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedUser, setSelectedUser] = useState(null);
@@ -177,6 +180,32 @@ export default function ManageUsers() {
         description="Delegate operational staff duties to students. Roles combine permissions; active membership status is independently derived."
       />
 
+      <section className="border rounded-xl p-4 space-y-3">
+        <h2 className="font-semibold text-sm">Academic term for staff roles</h2>
+        <p className="text-xs text-muted-foreground">Staff roles apply only to the active term. Organization administrators keep their separate access.</p>
+        {termError && <p role="alert" className="text-sm text-rose-700">{termError}</p>}
+        {terms.map((t) => <div key={t.id} className="flex gap-3 text-xs">
+          <span>{t.name} · {t.starts_on} to {t.ends_on} {t.is_current ? "· Current" : ""}</span>
+          {!t.is_current && <button className="text-teal-700" onClick={async () => {
+            setTermError("");
+            try { await userApi.setCurrentTerm(t.id); setTerms(await userApi.getTerms()); setUsers(await userApi.getUsers()); await refreshSession(); }
+            catch (err) { setTermError(err.message); }
+          }}>Activate</button>}
+        </div>)}
+        <form className="flex flex-wrap gap-2" onSubmit={async (e) => {
+          e.preventDefault(); setTermError("");
+          try { await userApi.createTerm(termForm); setTerms(await userApi.getTerms()); setTermForm({ name: "", starts_on: "", ends_on: "" }); }
+          catch (err) { setTermError(err.message); }
+        }}>
+          <input aria-label="Term name" placeholder="Term name" required minLength={2} maxLength={120} value={termForm.name}
+            onChange={(e) => setTermForm({ ...termForm, name: e.target.value })} className="border rounded p-2 text-xs" />
+          <label className="text-xs">Starts <input aria-label="Term start" type="date" required value={termForm.starts_on}
+            onChange={(e) => setTermForm({ ...termForm, starts_on: e.target.value })} className="border rounded p-2" /></label>
+          <label className="text-xs">Ends <input aria-label="Term end" type="date" required value={termForm.ends_on}
+            onChange={(e) => setTermForm({ ...termForm, ends_on: e.target.value })} className="border rounded p-2" /></label>
+          <button className="rounded bg-teal-600 text-white px-3 text-xs">Create term</button>
+        </form>
+      </section>
       {/* Search Input */}
       <div className="relative max-w-md">
         <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />

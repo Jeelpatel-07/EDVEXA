@@ -26,6 +26,8 @@ import Register from "./pages/auth/Register";
 import ForgotPassword from "./pages/auth/ForgotPassword";
 import ResetPassword from "./pages/auth/ResetPassword";
 import VerifyEmail from "./pages/auth/VerifyEmail";
+import AcceptInvite from "./pages/auth/AcceptInvite";
+import Organizations from "./pages/auth/Organizations";
 
 // Platform Admin Pages (Section 11 & 30)
 import PlatformDashboard from "./pages/platform/PlatformDashboard";
@@ -122,6 +124,8 @@ export default function App() {
               <Route path="/verify-email" element={<VerifyEmail />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
+              <Route path="/accept-invite" element={<AcceptInvite />} />
+              <Route path="/organizations" element={<ProtectedRoute><Organizations /></ProtectedRoute>} />
             </Route>
 
             {/* Top-Level Role Navigation Aliases (Section 10d) */}
