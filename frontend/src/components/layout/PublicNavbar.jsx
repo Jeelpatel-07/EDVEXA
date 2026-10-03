@@ -5,7 +5,7 @@ import { Calendar, Megaphone, Menu, X, ArrowRight, Shield } from "lucide-react";
 
 export default function PublicNavbar() {
   const location = useLocation();
-  const { isAuthenticated, user, hasStaffAccess } = useAuth();
+  const { isAuthenticated, user, hasStaffAccess, isPlatformAdmin } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const links = [
@@ -58,6 +58,15 @@ export default function PublicNavbar() {
         <div className="hidden md:flex items-center gap-3">
           {isAuthenticated ? (
             <div className="flex items-center gap-2">
+              {isPlatformAdmin() && (
+                <Link
+                  to="/platform/dashboard"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors"
+                >
+                  <Shield className="w-3.5 h-3.5 text-purple-700" />
+                  Platform Admin
+                </Link>
+              )}
               {hasStaffAccess && (
                 <Link
                   to="/app/manage"
@@ -68,7 +77,7 @@ export default function PublicNavbar() {
                 </Link>
               )}
               <Link
-                to="/app/dashboard"
+                to={isPlatformAdmin() ? "/platform/dashboard" : "/app/dashboard"}
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-teal-600 text-white hover:bg-teal-700 shadow-xs transition-colors"
               >
                 <span>Dashboard ({user?.name?.split(" ")[0]})</span>

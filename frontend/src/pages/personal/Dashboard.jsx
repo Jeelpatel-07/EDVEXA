@@ -18,9 +18,10 @@ import {
 import StatCard from "../../components/common/StatCard";
 import StatusBadge from "../../components/common/StatusBadge";
 import QRCode from "../../components/common/QRCode";
+import { ROLE_METADATA, PERMISSIONS } from "../../constants/permissions";
 
 export default function Dashboard() {
-  const { user, activeRole, membership, hasStaffAccess } = useAuth();
+  const { user, roles, membership, hasStaffAccess, isMember, hasPermission } = useAuth();
 
   const [tickets, setTickets] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -41,15 +42,32 @@ export default function Dashboard() {
       {/* Welcome & Member Banner */}
       <div className="bg-card rounded-2xl border border-border p-6 sm:p-8 shadow-xs relative overflow-hidden">
         <div className="max-w-2xl">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-teal-700 bg-teal-50 px-2.5 py-0.5 rounded-full border border-teal-200">
-              Active Role: {activeRole}
-            </span>
-            {membership ? (
-              <StatusBadge status={membership.status} />
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            {roles.length > 0 ? (
+              roles.map((r) => {
+                const meta = ROLE_METADATA[r];
+                return (
+                  <span
+                    key={r}
+                    className={`text-xs font-semibold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
+                      meta?.badgeColor || "bg-teal-50 text-teal-700 border-teal-200"
+                    }`}
+                  >
+                    {meta?.name ? meta.name.replace(" Administrator", " Admin") : r}
+                  </span>
+                );
+              })
+            ) : (
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200">
+                Registered Student
+              </span>
+            )}
+
+            {isMember() ? (
+              <StatusBadge status={membership?.status || "ACTIVE"} />
             ) : (
               <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                Non-Member
+                Guest (Non-Member)
               </span>
             )}
           </div>
@@ -105,8 +123,8 @@ export default function Dashboard() {
         />
         <StatCard
           title="Membership"
-          value={membership?.tier || "NONE"}
-          subtext={membership ? `Expires ${membership.expiryDate}` : "Standard Student"}
+          value={isMember() ? (membership?.tier || "ACTIVE") : "GUEST"}
+          subtext={isMember() ? `Expires ${membership?.expiryDate}` : "Standard Student (Non-Member)"}
           icon={CreditCard}
         />
         <StatCard
@@ -115,12 +133,21 @@ export default function Dashboard() {
           subtext={`${orders.filter((o) => o.pickupStatus === "READY_FOR_PICKUP").length} ready for pickup`}
           icon={ShoppingBag}
         />
-        <StatCard
-          title="Volunteer Shifts"
-          value={tasks.filter((t) => t.status !== "COMPLETED").length}
-          subtext="Assigned duties"
-          icon={CheckSquare}
-        />
+        {hasPermission(PERMISSIONS.TASKS_UPDATE_OWN) ? (
+          <StatCard
+            title="Volunteer Shifts"
+            value={tasks.filter((t) => t.status !== "COMPLETED").length}
+            subtext="Assigned duties"
+            icon={CheckSquare}
+          />
+        ) : (
+          <StatCard
+            title="Campus Events"
+            value="Browse"
+            subtext="Workshops & Hackathons"
+            icon={Calendar}
+          />
+        )}
       </div>
 
       {/* Main Content Layout: Active Pass & Operations */}
@@ -211,40 +238,42 @@ export default function Dashboard() {
 
         {/* Quick Links & Volunteer Tasks */}
         <div className="lg:col-span-5 space-y-6">
-          {/* Volunteer Shifts widget */}
-          <div className="bg-card rounded-2xl border border-border p-6 shadow-xs">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                <CheckSquare className="w-4 h-4 text-teal-600" />
-                <span>My Volunteer Tasks</span>
-              </h3>
-              <Link
-                to="/app/tasks"
-                className="text-xs text-teal-600 hover:underline font-medium"
-              >
-                View all
-              </Link>
-            </div>
-
-            <div className="space-y-3">
-              {tasks.slice(0, 2).map((t) => (
+          {/* Volunteer Shifts widget (Only shown for volunteers / task assignees) */}
+          {hasPermission(PERMISSIONS.TASKS_UPDATE_OWN) && (
+            <div className="bg-card rounded-2xl border border-border p-6 shadow-xs">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                  <CheckSquare className="w-4 h-4 text-teal-600" />
+                  <span>My Volunteer Tasks</span>
+                </h3>
                 <Link
-                  key={t.id}
-                  to={`/app/tasks/${t.id}`}
-                  className="block p-3 rounded-xl bg-slate-50 hover:bg-teal-50/40 border border-border hover:border-teal-200 transition-all text-xs"
+                  to="/app/tasks"
+                  className="text-xs text-teal-600 hover:underline font-medium"
                 >
-                  <div className="flex items-center justify-between font-semibold text-foreground">
-                    <span className="truncate max-w-[200px]">{t.title}</span>
-                    <StatusBadge status={t.status} />
-                  </div>
-                  <div className="mt-1 flex items-center gap-2 text-muted-foreground text-[11px]">
-                    <Clock className="w-3 h-3 text-slate-400" />
-                    <span>{t.date} • {t.shiftTime}</span>
-                  </div>
+                  View all
                 </Link>
-              ))}
+              </div>
+
+              <div className="space-y-3">
+                {tasks.slice(0, 2).map((t) => (
+                  <Link
+                    key={t.id}
+                    to={`/app/tasks/${t.id}`}
+                    className="block p-3 rounded-xl bg-slate-50 hover:bg-teal-50/40 border border-border hover:border-teal-200 transition-all text-xs"
+                  >
+                    <div className="flex items-center justify-between font-semibold text-foreground">
+                      <span className="truncate max-w-[200px]">{t.title}</span>
+                      <StatusBadge status={t.status} />
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 text-muted-foreground text-[11px]">
+                      <Clock className="w-3 h-3 text-slate-400" />
+                      <span>{t.date} • {t.shiftTime}</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Bulletins Widget */}
           <div className="bg-card rounded-2xl border border-border p-6 shadow-xs">

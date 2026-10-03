@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useCart } from "../../context/CartContext";
+import { PERMISSIONS, ROLES, ROLE_METADATA } from "../../constants/permissions";
 import {
   LayoutDashboard,
   CreditCard,
@@ -22,18 +23,27 @@ import {
   DollarSign,
   BarChart3,
   Users,
-  ChevronRight,
   ExternalLink,
+  Building2,
 } from "lucide-react";
 
 export default function Sidebar({ onCloseMobile }) {
   const location = useLocation();
-  const { user, activeRole, permissions, hasStaffAccess } = useAuth();
+  const {
+    user,
+    roles,
+    permissions,
+    hasPermission,
+    hasStaffAccess,
+    isPlatformAdmin,
+    isMember,
+    isGuest,
+  } = useAuth();
   const { cartCount } = useCart();
 
   const isStaffRoute = location.pathname.startsWith("/app/manage");
 
-  // Navigation items for Personal Workspace (available to everyone)
+  // Personal Workspace items (Section 24: Available to every authenticated organization user)
   const personalItems = [
     { label: "Dashboard", to: "/app/dashboard", icon: LayoutDashboard },
     { label: "Membership", to: "/app/membership", icon: CreditCard },
@@ -47,103 +57,109 @@ export default function Sidebar({ onCloseMobile }) {
       badge: cartCount > 0 ? cartCount : null,
     },
     { label: "My Orders", to: "/app/orders", icon: Receipt },
-    { label: "Volunteer Tasks", to: "/app/tasks", icon: CheckSquare },
-    { label: "My Claims", to: "/app/claims", icon: FileSpreadsheet },
+    // Show tasks only if user has tasks.update_own (Volunteers, Leads)
+    ...(hasPermission(PERMISSIONS.TASKS_UPDATE_OWN)
+      ? [{ label: "My Tasks", to: "/app/tasks", icon: CheckSquare }]
+      : []),
+    // Show claims submission if user has expenses.submit
+    ...(hasPermission(PERMISSIONS.EXPENSES_SUBMIT)
+      ? [{ label: "My Claims", to: "/app/claims", icon: FileSpreadsheet }]
+      : []),
     { label: "Announcements", to: "/app/announcements", icon: Megaphone },
     { label: "Notifications", to: "/app/notifications", icon: Bell },
     { label: "Profile", to: "/app/profile", icon: User },
   ];
 
-  // Navigation items for Staff Workspace (filtered by permissions)
-  const staffItems = [
+  // Staff Workspace items strictly filtered by the Absolute Permission Matrix (Section 23)
+  const staffConfig = [
     {
       label: "Overview",
       to: "/app/manage",
       icon: LayoutDashboard,
-      allowed: true,
-    },
-    {
-      label: "Members",
-      to: "/app/manage/members",
-      icon: Users,
-      allowed: permissions.canManageMembers,
-    },
-    {
-      label: "Membership Plans",
-      to: "/app/manage/membership-plans",
-      icon: CreditCard,
-      allowed: permissions.canManageMembers,
-    },
-    {
-      label: "Events",
-      to: "/app/manage/events",
-      icon: Calendar,
-      allowed: permissions.canManageEvents,
-    },
-    {
-      label: "Gate Check-in",
-      to: "/app/manage/check-in",
-      icon: QrCode,
-      allowed: permissions.canCheckIn,
-    },
-    {
-      label: "Products",
-      to: "/app/manage/products",
-      icon: Package,
-      allowed: permissions.canManageShop,
-    },
-    {
-      label: "Inventory",
-      to: "/app/manage/inventory",
-      icon: Boxes,
-      allowed: permissions.canManageShop,
-    },
-    {
-      label: "Orders",
-      to: "/app/manage/orders",
-      icon: Receipt,
-      allowed: permissions.canManageShop || permissions.canViewFinance,
-    },
-    {
-      label: "Announcements",
-      to: "/app/manage/announcements",
-      icon: Megaphone,
-      allowed: permissions.canManageEvents || permissions.canManageUsers,
-    },
-    {
-      label: "Fundraisers",
-      to: "/app/manage/fundraisers",
-      icon: HandHeart,
-      allowed: permissions.canViewFinance || permissions.canManageEvents,
-    },
-    {
-      label: "Expense Claims",
-      to: "/app/manage/claims",
-      icon: FileSpreadsheet,
-      allowed: permissions.canReviewClaims,
-    },
-    {
-      label: "Finance & Ledger",
-      to: "/app/manage/finance",
-      icon: DollarSign,
-      allowed: permissions.canViewFinance,
-    },
-    {
-      label: "Reports",
-      to: "/app/manage/reports",
-      icon: BarChart3,
-      allowed: permissions.canViewFinance,
+      allowed: hasStaffAccess,
     },
     {
       label: "Users & Roles",
       to: "/app/manage/users",
       icon: Shield,
-      allowed: permissions.canManageUsers,
+      allowed: hasPermission(PERMISSIONS.USERS_MANAGE),
+    },
+    {
+      label: "Members",
+      to: "/app/manage/members",
+      icon: Users,
+      allowed: hasPermission(PERMISSIONS.USERS_MANAGE),
+    },
+    {
+      label: "Membership Plans",
+      to: "/app/manage/membership-plans",
+      icon: CreditCard,
+      allowed: hasPermission(PERMISSIONS.USERS_MANAGE),
+    },
+    {
+      label: "Events",
+      to: "/app/manage/events",
+      icon: Calendar,
+      allowed: hasPermission(PERMISSIONS.EVENTS_MANAGE),
+    },
+    {
+      label: "Gate Check-in",
+      to: "/app/manage/check-in",
+      icon: QrCode,
+      allowed: hasPermission(PERMISSIONS.TICKETS_CHECKIN),
+    },
+    {
+      label: "Products",
+      to: "/app/manage/products",
+      icon: Package,
+      allowed: hasPermission(PERMISSIONS.PRODUCTS_MANAGE),
+    },
+    {
+      label: "Inventory",
+      to: "/app/manage/inventory",
+      icon: Boxes,
+      allowed: hasPermission(PERMISSIONS.INVENTORY_MANAGE),
+    },
+    {
+      label: "Orders",
+      to: "/app/manage/orders",
+      icon: Receipt,
+      allowed: hasPermission(PERMISSIONS.PRODUCTS_MANAGE),
+    },
+    {
+      label: "Announcements",
+      to: "/app/manage/announcements",
+      icon: Megaphone,
+      allowed: hasPermission(PERMISSIONS.ANNOUNCEMENTS_MANAGE),
+    },
+    {
+      label: "Fundraisers",
+      to: "/app/manage/fundraisers",
+      icon: HandHeart,
+      allowed: hasPermission(PERMISSIONS.FUNDRAISERS_MANAGE),
+    },
+    {
+      label: "Expense Claims",
+      to: "/app/manage/claims",
+      icon: FileSpreadsheet,
+      allowed: hasPermission(PERMISSIONS.EXPENSES_APPROVE),
+    },
+    {
+      label: "Finance & Ledger",
+      to: "/app/manage/finance",
+      icon: DollarSign,
+      allowed: hasPermission(PERMISSIONS.FINANCE_VIEW),
+    },
+    {
+      label: "Reports",
+      to: "/app/manage/reports",
+      icon: BarChart3,
+      allowed: hasPermission(PERMISSIONS.FINANCE_VIEW),
     },
   ];
 
   const currentItems = isStaffRoute
-    ? staffItems.filter((i) => i.allowed)
+    ? staffConfig.filter((i) => i.allowed)
     : personalItems;
 
   return (
@@ -168,7 +184,24 @@ export default function Sidebar({ onCloseMobile }) {
         </Link>
       </div>
 
-      {/* Workspace Switcher Pill */}
+      {/* Platform Admin Banner if user is Platform Admin (Section 11) */}
+      {isPlatformAdmin() && (
+        <div className="p-3 border-b border-purple-200 bg-purple-50/70">
+          <Link
+            to="/platform/dashboard"
+            onClick={onCloseMobile}
+            className="flex items-center justify-between px-3 py-2 rounded-lg bg-purple-600 text-white text-xs font-bold hover:bg-purple-700 shadow-xs transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4" />
+              <span>Platform Control</span>
+            </div>
+            <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+          </Link>
+        </div>
+      )}
+
+      {/* Workspace Switcher Pill (Personal vs Staff) */}
       {hasStaffAccess && (
         <div className="p-3 border-b border-border bg-slate-50/60">
           <div className="grid grid-cols-2 p-1 bg-slate-200/70 rounded-lg text-xs font-medium">
@@ -199,12 +232,12 @@ export default function Sidebar({ onCloseMobile }) {
         </div>
       )}
 
-      {/* Nav List */}
+      {/* Navigation List */}
       <div className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         <div className="px-3 pb-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
           <span>{isStaffRoute ? "Staff Management" : "Personal Workspace"}</span>
-          <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
-            {activeRole}
+          <span className="text-[10px] bg-slate-100 text-slate-700 font-semibold px-1.5 py-0.5 rounded">
+            {isMember() ? "Member" : "Guest"}
           </span>
         </div>
 
@@ -247,7 +280,7 @@ export default function Sidebar({ onCloseMobile }) {
         })}
       </div>
 
-      {/* Footer Info */}
+      {/* Footer link to public portal */}
       <div className="p-3 border-t border-border bg-slate-50/40 text-xs">
         <Link
           to="/"

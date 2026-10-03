@@ -13,8 +13,10 @@ import {
 import PageHeader from "../../components/common/PageHeader";
 import StatusBadge from "../../components/common/StatusBadge";
 
+import { ROLE_METADATA } from "../../constants/permissions";
+
 export default function Profile() {
-  const { user, roles, activeRole, membership } = useAuth();
+  const { user, roles, membership, isMember, organization } = useAuth();
   const [saved, setSaved] = useState(false);
 
   const handleSave = (e) => {
@@ -50,33 +52,49 @@ export default function Profile() {
               <span className="text-xs font-semibold text-teal-700 bg-teal-50 px-2.5 py-0.5 rounded border border-teal-200">
                 {user?.department}
               </span>
-              {membership && <StatusBadge status={membership.tier} />}
+              <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded border border-slate-200">
+                {organization?.name || "Skyline Student Association"}
+              </span>
+              {isMember() ? (
+                <StatusBadge status={membership?.status || "ACTIVE"} />
+              ) : (
+                <span className="text-xs text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded border border-amber-200">
+                  Guest Student
+                </span>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Roles Assigned to User */}
+        {/* Roles Assigned to User (Section 18: Union of permissions) */}
         <div>
-          <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2.5 flex items-center gap-2">
+          <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-2">
             <Shield className="w-4 h-4 text-teal-600" />
-            <span>Assigned Organization Roles (Multi-Role Support)</span>
+            <span>Assigned Explicit Staff Roles</span>
           </h3>
           <p className="text-xs text-muted-foreground mb-3">
-            In EDVEXA, users can hold multiple responsibilities simultaneously. Your active permissions reflect your chosen role.
+            In EDVEXA, users can hold multiple responsibilities simultaneously. Your authorized actions are calculated as the union of all assigned staff roles.
           </p>
           <div className="flex flex-wrap gap-2">
-            {roles?.map((r) => (
-              <span
-                key={r}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold border ${
-                  activeRole === r
-                    ? "bg-teal-600 text-white border-teal-600 shadow-2xs"
-                    : "bg-slate-50 text-slate-700 border-border"
-                }`}
-              >
-                {r} {activeRole === r && "(Active Context)"}
+            {roles && roles.length > 0 ? (
+              roles.map((r) => {
+                const meta = ROLE_METADATA[r];
+                return (
+                  <span
+                    key={r}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${
+                      meta?.badgeColor || "bg-teal-50 text-teal-800 border-teal-200 shadow-2xs"
+                    }`}
+                  >
+                    {meta?.name || r}
+                  </span>
+                );
+              })
+            ) : (
+              <span className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                No explicit staff roles (Standard Student / Member)
               </span>
-            ))}
+            )}
           </div>
         </div>
 

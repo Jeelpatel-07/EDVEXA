@@ -1,15 +1,69 @@
 // Initial seed data and realistic storage for EDVEXA frontend workflows
+import { ROLES, computePermissionsForRoles } from "../constants/permissions";
+
+export const MOCK_ORGANIZATIONS = [
+  {
+    id: "org-skyline",
+    name: "Skyline Student Association",
+    code: "SSA",
+    status: "ACTIVE",
+    adminEmail: "org.admin@college.edu",
+    createdAt: "2024-08-15",
+    memberCount: 342,
+    currency: "USD",
+    category: "University Student Union",
+  },
+  {
+    id: "org-tech",
+    name: "Engineering Student Council",
+    code: "ESC",
+    status: "ACTIVE",
+    adminEmail: "esc-admin@college.edu",
+    createdAt: "2024-09-01",
+    memberCount: 180,
+    currency: "USD",
+    category: "Academic Society",
+  },
+  {
+    id: "org-arts",
+    name: "Fine Arts & Media Guild",
+    code: "FAMG",
+    status: "SUSPENDED",
+    adminEmail: "arts-lead@college.edu",
+    createdAt: "2024-11-10",
+    memberCount: 65,
+    currency: "USD",
+    category: "Arts & Culture",
+  },
+];
 
 export const MOCK_USERS = [
+  // 1. Platform Admin (Platform-level actor, no org operations)
+  {
+    id: "demo-platform-admin",
+    name: "Sarah Vance",
+    email: "platform.admin@edvexa.com",
+    studentId: "STAFF-PLT-001",
+    department: "EDVEXA Platform Operations",
+    avatar: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
+    roles: [ROLES.PLATFORM_ADMIN],
+    organization: null,
+    membership: null,
+    personaKey: "DEMO_PLATFORM_ADMIN",
+    personaTitle: "Platform Admin",
+    personaDescription: "Tenant management, org setups, platform audit logs",
+  },
+
+  // 2. Org Admin (Highest organization authority)
   {
     id: "usr_1",
     name: "Alex Rivera",
-    email: "alex.rivera@college.edu",
+    email: "org.admin@college.edu",
     studentId: "STU-2024-0891",
     department: "Computer Science & Engineering",
     avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-    roles: ["Student", "Volunteer", "Event Manager", "Treasurer", "Administrator"],
-    activeRole: "Administrator",
+    roles: [ROLES.ORG_ADMIN],
+    organization: MOCK_ORGANIZATIONS[0],
     membership: {
       id: "mem_01",
       planName: "Annual Gold Member",
@@ -17,40 +71,188 @@ export const MOCK_USERS = [
       tier: "GOLD",
       expiryDate: "2027-05-31",
       memberDiscountPercent: 20,
-      autoRenew: true
-    }
+      autoRenew: true,
+      paymentStatus: "PAID",
+    },
+    personaKey: "DEMO_ORG_ADMIN",
+    personaTitle: "Org Admin",
+    personaDescription: "Manages org users, staff roles, governance & all operations",
   },
+
+  // 3. Treasurer (Financial officer)
   {
-    id: "usr_2",
-    name: "Priya Sharma",
-    email: "priya.sharma@college.edu",
-    studentId: "STU-2024-1142",
-    department: "Information Technology",
-    avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
-    roles: ["Student", "Gate Staff"],
-    activeRole: "Gate Staff",
+    id: "demo-treasurer",
+    name: "Marcus Chen",
+    email: "treasurer@college.edu",
+    studentId: "STU-2024-0421",
+    department: "Finance & Accounting",
+    avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+    roles: [ROLES.TREASURER],
+    organization: MOCK_ORGANIZATIONS[0],
     membership: {
-      id: "mem_02",
+      id: "mem_03",
+      planName: "Annual Gold Member",
+      status: "ACTIVE",
+      tier: "GOLD",
+      expiryDate: "2027-05-31",
+      memberDiscountPercent: 20,
+      autoRenew: true,
+      paymentStatus: "PAID",
+    },
+    personaKey: "DEMO_TREASURER",
+    personaTitle: "Treasurer",
+    personaDescription: "Finance governance, expense review, approvals & reimbursements",
+  },
+
+  // 4. Event Manager (Operations, Read-only Finance)
+  {
+    id: "demo-event-manager",
+    name: "Elena Gomez",
+    email: "event.manager@college.edu",
+    studentId: "STU-2024-0755",
+    department: "Media & Communications",
+    avatar: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80",
+    roles: [ROLES.EVENT_MANAGER],
+    organization: MOCK_ORGANIZATIONS[0],
+    membership: {
+      id: "mem_04",
       planName: "Semester Silver Member",
       status: "ACTIVE",
       tier: "SILVER",
       expiryDate: "2026-12-15",
       memberDiscountPercent: 10,
-      autoRenew: false
-    }
+      autoRenew: false,
+      paymentStatus: "PAID",
+    },
+    personaKey: "DEMO_EVENT_MANAGER",
+    personaTitle: "Event Manager",
+    personaDescription: "Events, tickets, products, announcements, finance READ-ONLY",
   },
+
+  // 5. Gate Staff (Ticket Check-in)
+  {
+    id: "usr_2",
+    name: "Priya Sharma",
+    email: "gate.staff@college.edu",
+    studentId: "STU-2024-1142",
+    department: "Information Technology",
+    avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
+    roles: [ROLES.GATE_STAFF],
+    organization: MOCK_ORGANIZATIONS[0],
+    membership: null, // GUEST state
+    personaKey: "DEMO_GATE_STAFF",
+    personaTitle: "Gate Staff",
+    personaDescription: "Rapid QR scanning, door attendee lookup & check-in",
+  },
+
+  // 6. Volunteer (Tasks & Claims)
+  {
+    id: "demo-volunteer",
+    name: "Jordan Lee",
+    email: "volunteer@college.edu",
+    studentId: "STU-2025-0199",
+    department: "Civil Engineering",
+    avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
+    roles: [ROLES.VOLUNTEER],
+    organization: MOCK_ORGANIZATIONS[0],
+    membership: null, // GUEST state (volunteer without active membership)
+    personaKey: "DEMO_VOLUNTEER",
+    personaTitle: "Volunteer",
+    personaDescription: "Assigned tasks, updates own task status, submits expense claims",
+  },
+
+  // 7. Member (Derived active paid membership, NO explicit staff roles)
+  {
+    id: "demo-member",
+    name: "Maya Lin",
+    email: "member@college.edu",
+    studentId: "STU-2024-0312",
+    department: "Biomedical Sciences",
+    avatar: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150&auto=format&fit=crop&q=80",
+    roles: [], // Derived member!
+    organization: MOCK_ORGANIZATIONS[0],
+    membership: {
+      id: "mem_05",
+      planName: "Annual Gold Member",
+      status: "ACTIVE",
+      tier: "GOLD",
+      expiryDate: "2027-05-31",
+      memberDiscountPercent: 20,
+      autoRenew: true,
+      paymentStatus: "PAID",
+    },
+    personaKey: "DEMO_MEMBER",
+    personaTitle: "Active Member",
+    personaDescription: "Student with active Gold pass, member pricing & priority perks",
+  },
+
+  // 8. Guest (Registered non-member)
   {
     id: "usr_3",
     name: "Devon Vance",
-    email: "devon.v@college.edu",
+    email: "guest@college.edu",
     studentId: "STU-2025-0034",
     department: "Business Administration",
-    avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-    roles: ["Student"],
-    activeRole: "Student",
-    membership: null
-  }
+    avatar: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80",
+    roles: [], // Guest!
+    organization: MOCK_ORGANIZATIONS[0],
+    membership: null,
+    personaKey: "DEMO_GUEST",
+    personaTitle: "Guest (Student)",
+    personaDescription: "Registered student without membership. Standard non-member pricing",
+  },
+
+  // 9. Multi-role Demo: Org Admin + Treasurer + Member
+  {
+    id: "demo-multi-admin-treasurer",
+    name: "Dr. Ronald Sterling",
+    email: "admin.treasurer@college.edu",
+    studentId: "STAFF-EXC-002",
+    department: "Executive Faculty Advisory",
+    avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80",
+    roles: [ROLES.ORG_ADMIN, ROLES.TREASURER],
+    organization: MOCK_ORGANIZATIONS[0],
+    membership: {
+      id: "mem_06",
+      planName: "Annual Gold Member",
+      status: "ACTIVE",
+      tier: "GOLD",
+      expiryDate: "2027-05-31",
+      memberDiscountPercent: 20,
+      autoRenew: true,
+      paymentStatus: "PAID",
+    },
+    personaKey: "DEMO_ORG_ADMIN_TREASURER_MEMBER",
+    personaTitle: "Admin + Treasurer",
+    personaDescription: "Combined authority: Organization administration + Treasury approval",
+  },
+
+  // 10. Multi-role Demo: Event Manager + Volunteer + Member
+  {
+    id: "demo-multi-event-volunteer",
+    name: "Kavita Rao",
+    email: "event.volunteer@college.edu",
+    studentId: "STU-2024-0518",
+    department: "Design & Interaction",
+    avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80",
+    roles: [ROLES.EVENT_MANAGER, ROLES.VOLUNTEER],
+    organization: MOCK_ORGANIZATIONS[0],
+    membership: {
+      id: "mem_07",
+      planName: "Annual Gold Member",
+      status: "ACTIVE",
+      tier: "GOLD",
+      expiryDate: "2027-05-31",
+      memberDiscountPercent: 20,
+      autoRenew: true,
+      paymentStatus: "PAID",
+    },
+    personaKey: "DEMO_EVENT_MANAGER_VOLUNTEER_MEMBER",
+    personaTitle: "Event Mgr + Volunteer",
+    personaDescription: "Combined: Event management + Volunteer task execution + Member perks",
+  },
 ];
+
 
 export const MOCK_MEMBERSHIP_PLANS = [
   {

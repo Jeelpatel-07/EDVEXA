@@ -2,11 +2,16 @@ import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-
 import { AuthProvider } from "./context/AuthContext";
 import { CartProvider } from "./context/CartContext";
 
-// Layouts
+// Route Guards & Layouts
 import PublicNavbar from "./components/layout/PublicNavbar";
 import AppShell from "./components/layout/AppShell";
+import PlatformShell from "./components/layout/PlatformShell";
 import ProtectedRoute from "./components/common/ProtectedRoute";
+import OrganizationRoute from "./components/common/OrganizationRoute";
+import PlatformRoute from "./components/common/PlatformRoute";
 import PermissionGuard from "./components/common/PermissionGuard";
+import AccessDenied from "./components/common/AccessDenied";
+import { PERMISSIONS, ROLES } from "./constants/permissions";
 
 // Public Pages
 import Home from "./pages/public/Home";
@@ -21,6 +26,12 @@ import Register from "./pages/auth/Register";
 import ForgotPassword from "./pages/auth/ForgotPassword";
 import ResetPassword from "./pages/auth/ResetPassword";
 import VerifyEmail from "./pages/auth/VerifyEmail";
+
+// Platform Admin Pages (Section 11 & 30)
+import PlatformDashboard from "./pages/platform/PlatformDashboard";
+import PlatformOrganizations from "./pages/platform/PlatformOrganizations";
+import PlatformUsers from "./pages/platform/PlatformUsers";
+import PlatformAuditLogs from "./pages/platform/PlatformAuditLogs";
 
 // Personal Workspace Pages
 import Dashboard from "./pages/personal/Dashboard";
@@ -113,19 +124,35 @@ export default function App() {
               <Route path="/reset-password" element={<ResetPassword />} />
             </Route>
 
-            {/* AUTHENTICATED WORKSPACES */}
+            {/* PLATFORM ADMIN WORKSPACE (Section 11 & 30) */}
+            <Route
+              path="/platform"
+              element={
+                <PlatformRoute>
+                  <PlatformShell />
+                </PlatformRoute>
+              }
+            >
+              <Route index element={<Navigate to="/platform/dashboard" replace />} />
+              <Route path="dashboard" element={<PlatformDashboard />} />
+              <Route path="organizations" element={<PlatformOrganizations />} />
+              <Route path="users" element={<PlatformUsers />} />
+              <Route path="audit-logs" element={<PlatformAuditLogs />} />
+            </Route>
+
+            {/* ORGANIZATION WORKSPACE (/app/...) */}
             <Route
               path="/app"
               element={
-                <ProtectedRoute>
+                <OrganizationRoute>
                   <AppShell />
-                </ProtectedRoute>
+                </OrganizationRoute>
               }
             >
               {/* Redirect /app to /app/dashboard */}
               <Route index element={<Navigate to="/app/dashboard" replace />} />
 
-              {/* PERSONAL WORKSPACE */}
+              {/* PERSONAL WORKSPACE (Available to all authenticated organization users) */}
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="membership" element={<Membership />} />
               <Route path="membership/plans" element={<MembershipPlans />} />
@@ -148,13 +175,22 @@ export default function App() {
               <Route path="notifications" element={<Notifications />} />
               <Route path="profile" element={<Profile />} />
 
-              {/* STAFF WORKSPACE (Guarded by Permissions) */}
+              {/* STAFF WORKSPACE (Strictly Guarded by Permissions) */}
               <Route path="manage" element={<StaffOverview />} />
-              
+
+              {/* User and Role Delegation (Section 31: ORG_ADMIN) */}
+              <Route
+                path="manage/users"
+                element={
+                  <PermissionGuard permission={PERMISSIONS.USERS_MANAGE}>
+                    <ManageUsers />
+                  </PermissionGuard>
+                }
+              />
               <Route
                 path="manage/members"
                 element={
-                  <PermissionGuard permission="canManageMembers">
+                  <PermissionGuard permission={PERMISSIONS.USERS_MANAGE}>
                     <ManageMembers />
                   </PermissionGuard>
                 }
@@ -162,15 +198,17 @@ export default function App() {
               <Route
                 path="manage/membership-plans"
                 element={
-                  <PermissionGuard permission="canManageMembers">
+                  <PermissionGuard permission={PERMISSIONS.USERS_MANAGE}>
                     <ManageMembershipPlans />
                   </PermissionGuard>
                 }
               />
+
+              {/* Events & Ticketing (Section 4: ORG_ADMIN, EVENT_MANAGER) */}
               <Route
                 path="manage/events"
                 element={
-                  <PermissionGuard permission="canManageEvents">
+                  <PermissionGuard permission={PERMISSIONS.EVENTS_MANAGE}>
                     <ManageEvents />
                   </PermissionGuard>
                 }
@@ -178,23 +216,27 @@ export default function App() {
               <Route
                 path="manage/events/new"
                 element={
-                  <PermissionGuard permission="canManageEvents">
+                  <PermissionGuard permission={PERMISSIONS.EVENTS_CREATE}>
                     <NewEvent />
                   </PermissionGuard>
                 }
               />
+
+              {/* Door Check-In (Section 4: ORG_ADMIN, EVENT_MANAGER, GATE_STAFF) */}
               <Route
                 path="manage/check-in"
                 element={
-                  <PermissionGuard permission="canCheckIn">
+                  <PermissionGuard permission={PERMISSIONS.TICKETS_CHECKIN}>
                     <GateCheckIn />
                   </PermissionGuard>
                 }
               />
+
+              {/* Products & Inventory (Section 4: ORG_ADMIN, EVENT_MANAGER) */}
               <Route
                 path="manage/products"
                 element={
-                  <PermissionGuard permission="canManageShop">
+                  <PermissionGuard permission={PERMISSIONS.PRODUCTS_MANAGE}>
                     <ManageProducts />
                   </PermissionGuard>
                 }
@@ -202,7 +244,7 @@ export default function App() {
               <Route
                 path="manage/products/new"
                 element={
-                  <PermissionGuard permission="canManageShop">
+                  <PermissionGuard permission={PERMISSIONS.PRODUCTS_MANAGE}>
                     <NewProduct />
                   </PermissionGuard>
                 }
@@ -210,7 +252,7 @@ export default function App() {
               <Route
                 path="manage/inventory"
                 element={
-                  <PermissionGuard permission="canManageShop">
+                  <PermissionGuard permission={PERMISSIONS.INVENTORY_MANAGE}>
                     <Inventory />
                   </PermissionGuard>
                 }
@@ -218,7 +260,7 @@ export default function App() {
               <Route
                 path="manage/orders"
                 element={
-                  <PermissionGuard permission="canManageShop">
+                  <PermissionGuard permission={PERMISSIONS.PRODUCTS_MANAGE}>
                     <ManageOrders />
                   </PermissionGuard>
                 }
@@ -227,10 +269,12 @@ export default function App() {
                 path="manage/orders/:orderId"
                 element={<OrderDetail />}
               />
+
+              {/* Announcements (Section 4: ORG_ADMIN, EVENT_MANAGER) */}
               <Route
                 path="manage/announcements"
                 element={
-                  <PermissionGuard permission="canManageEvents">
+                  <PermissionGuard permission={PERMISSIONS.ANNOUNCEMENTS_MANAGE}>
                     <ManageAnnouncements />
                   </PermissionGuard>
                 }
@@ -238,15 +282,17 @@ export default function App() {
               <Route
                 path="manage/announcements/new"
                 element={
-                  <PermissionGuard permission="canManageEvents">
+                  <PermissionGuard permission={PERMISSIONS.ANNOUNCEMENTS_CREATE}>
                     <NewAnnouncement />
                   </PermissionGuard>
                 }
               />
+
+              {/* Fundraisers (Section 4: ORG_ADMIN, EVENT_MANAGER) */}
               <Route
                 path="manage/fundraisers"
                 element={
-                  <PermissionGuard permission="canViewFinance">
+                  <PermissionGuard permission={PERMISSIONS.FUNDRAISERS_MANAGE}>
                     <ManageFundraisers />
                   </PermissionGuard>
                 }
@@ -254,15 +300,17 @@ export default function App() {
               <Route
                 path="manage/fundraisers/new"
                 element={
-                  <PermissionGuard permission="canViewFinance">
+                  <PermissionGuard permission={PERMISSIONS.FUNDRAISERS_MANAGE}>
                     <NewFundraiser />
                   </PermissionGuard>
                 }
               />
+
+              {/* Claims Audit & Approval (Section 4 & 26: ORG_ADMIN, TREASURER) */}
               <Route
                 path="manage/claims"
                 element={
-                  <PermissionGuard permission="canReviewClaims">
+                  <PermissionGuard permission={PERMISSIONS.EXPENSES_APPROVE}>
                     <ManageClaims />
                   </PermissionGuard>
                 }
@@ -270,23 +318,26 @@ export default function App() {
               <Route
                 path="manage/claims/:claimId"
                 element={
-                  <PermissionGuard permission="canReviewClaims">
+                  <PermissionGuard permission={PERMISSIONS.EXPENSES_APPROVE}>
                     <ReviewClaim />
                   </PermissionGuard>
                 }
               />
+
+              {/* Financial Dashboard & Reports (Section 4 & 25: ORG_ADMIN, TREASURER, EVENT_MANAGER [read-only]) */}
               <Route
                 path="manage/finance"
                 element={
-                  <PermissionGuard permission="canViewFinance">
+                  <PermissionGuard permission={PERMISSIONS.FINANCE_VIEW}>
                     <FinanceDashboard />
                   </PermissionGuard>
                 }
               />
+              {/* Financial Mutation: Strictly ORG_ADMIN, TREASURER (Section 25: EVENT_MANAGER cannot mutate) */}
               <Route
                 path="manage/finance/entries"
                 element={
-                  <PermissionGuard permission="canViewFinance">
+                  <PermissionGuard permission={PERMISSIONS.FINANCE_MANAGE}>
                     <LedgerEntries />
                   </PermissionGuard>
                 }
@@ -294,7 +345,7 @@ export default function App() {
               <Route
                 path="manage/finance/entries/new"
                 element={
-                  <PermissionGuard permission="canViewFinance">
+                  <PermissionGuard permission={PERMISSIONS.FINANCE_MANAGE}>
                     <NewLedgerEntry />
                   </PermissionGuard>
                 }
@@ -302,20 +353,15 @@ export default function App() {
               <Route
                 path="manage/reports"
                 element={
-                  <PermissionGuard permission="canViewFinance">
+                  <PermissionGuard permission={PERMISSIONS.FINANCE_VIEW}>
                     <FinanceReports />
                   </PermissionGuard>
                 }
               />
-              <Route
-                path="manage/users"
-                element={
-                  <PermissionGuard permission="canManageUsers">
-                    <ManageUsers />
-                  </PermissionGuard>
-                }
-              />
             </Route>
+
+            {/* Access Denied explicit direct route */}
+            <Route path="/access-denied" element={<AccessDenied />} />
 
             {/* Fallback for undefined routes */}
             <Route path="*" element={<Navigate to="/" replace />} />

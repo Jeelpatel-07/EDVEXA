@@ -19,10 +19,17 @@ import PageHeader from "../../components/common/PageHeader";
 import StatCard from "../../components/common/StatCard";
 import DataTable from "../../components/common/DataTable";
 import LoadingState from "../../components/common/LoadingState";
+import { useAuth } from "../../context/AuthContext";
+import { PERMISSIONS } from "../../constants/permissions";
 
 export default function FinanceDashboard() {
+  const { hasPermission } = useAuth();
+  const canManageFinance = hasPermission(PERMISSIONS.FINANCE_MANAGE);
+  const isReadOnly = !canManageFinance;
+
   const [finance, setFinance] = useState(null);
   const [loading, setLoading] = useState(true);
+
 
   useEffect(() => {
     financeApi
@@ -93,17 +100,32 @@ export default function FinanceDashboard() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Student Organization Treasury & Ledger"
-        description="Authoritative backend financial governance and income disbursement records."
+        title={
+          <div className="flex items-center gap-2.5">
+            <span>Student Organization Treasury & Ledger</span>
+            {isReadOnly && (
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-amber-50 text-amber-800 border border-amber-300 shadow-2xs">
+                READ ONLY
+              </span>
+            )}
+          </div>
+        }
+        description={
+          isReadOnly
+            ? "Read-only inspection mode: You can review live financial records, cash flow, and reports, but ledger entries and payout authorizations are restricted to Treasury officers."
+            : "Authoritative backend financial governance and income disbursement records."
+        }
         action={
           <div className="flex items-center gap-2">
-            <Link
-              to="/app/manage/finance/entries/new"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 shadow-xs"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Record Ledger Entry</span>
-            </Link>
+            {canManageFinance && (
+              <Link
+                to="/app/manage/finance/entries/new"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Record Ledger Entry</span>
+              </Link>
+            )}
             <Link
               to="/app/manage/reports"
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-2xs"

@@ -15,8 +15,14 @@ import Breadcrumbs from "../../components/common/Breadcrumbs";
 import StatusBadge from "../../components/common/StatusBadge";
 import LoadingState from "../../components/common/LoadingState";
 import ErrorState from "../../components/common/ErrorState";
+import { useAuth } from "../../context/AuthContext";
+import { PERMISSIONS } from "../../constants/permissions";
 
 export default function ReviewClaim() {
+  const { hasPermission } = useAuth();
+  const canApprove = hasPermission(PERMISSIONS.EXPENSES_APPROVE);
+  const canReimburse = hasPermission(PERMISSIONS.EXPENSES_REIMBURSE);
+
   const { claimId } = useParams();
   const navigate = useNavigate();
 
@@ -173,28 +179,38 @@ export default function ReviewClaim() {
           </Link>
 
           <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-            <button
-              onClick={() => handleAction("REJECTED")}
-              disabled={updating}
-              className="px-4 py-2 rounded-xl border border-rose-300 text-rose-700 bg-rose-50 text-xs font-bold hover:bg-rose-100"
-            >
-              Reject Claim
-            </button>
-            <button
-              onClick={() => handleAction("APPROVED")}
-              disabled={updating}
-              className="px-4 py-2 rounded-xl border border-teal-600 text-teal-700 bg-teal-50 text-xs font-bold hover:bg-teal-100"
-            >
-              Approve Claim
-            </button>
-            <button
-              onClick={() => handleAction("REIMBURSED")}
-              disabled={updating}
-              className="px-4 py-2 rounded-xl bg-teal-600 text-white text-xs font-bold hover:bg-teal-700 shadow-xs flex items-center gap-1"
-            >
-              <DollarSign className="w-3.5 h-3.5" />
-              <span>Issue Payout & Log to Ledger</span>
-            </button>
+            {canApprove ? (
+              <>
+                <button
+                  onClick={() => handleAction("REJECTED")}
+                  disabled={updating}
+                  className="px-4 py-2 rounded-xl border border-rose-300 text-rose-700 bg-rose-50 text-xs font-bold hover:bg-rose-100 transition-colors"
+                >
+                  Reject Claim
+                </button>
+                <button
+                  onClick={() => handleAction("APPROVED")}
+                  disabled={updating}
+                  className="px-4 py-2 rounded-xl border border-teal-600 text-teal-700 bg-teal-50 text-xs font-bold hover:bg-teal-100 transition-colors"
+                >
+                  Approve Claim
+                </button>
+                {canReimburse && (
+                  <button
+                    onClick={() => handleAction("REIMBURSED")}
+                    disabled={updating}
+                    className="px-4 py-2 rounded-xl bg-teal-600 text-white text-xs font-bold hover:bg-teal-700 shadow-xs flex items-center gap-1 transition-colors"
+                  >
+                    <DollarSign className="w-3.5 h-3.5" />
+                    <span>Issue Payout & Log to Ledger</span>
+                  </button>
+                )}
+              </>
+            ) : (
+              <span className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-medium border border-slate-200">
+                Read-Only: Adjudication permissions restricted to Org Admin & Treasurer
+              </span>
+            )}
           </div>
         </div>
       </div>
