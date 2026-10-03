@@ -43,6 +43,13 @@ export const orderApi = {
       { status }
     );
   },
+
+  updatePickupStatus: async (orderId, status = "PICKED_UP") => {
+    return await apiClient.patch(
+      `/orgs/${getCurrentOrgId()}/orders/${orderId}/pickup`,
+      { status }
+    );
+  },
 };
 
 export default orderApi;

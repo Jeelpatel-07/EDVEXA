@@ -122,7 +122,7 @@ def invite_user(
     )
     db.commit()
 
-    invite_url = f"{settings.APP_BASE_URL}/accept-invite?token={raw_tok}"
+    invite_url = f"{settings.APP_BASE_URL}/accept-invite#token={raw_tok}"
     send_email_notification(
         recipient=req.email,
         subject=f"Staff Invitation for {org_ctx.org_name}",
@@ -171,7 +171,7 @@ def assign_role(
         text("""
             SELECT id FROM user_roles 
             WHERE user_id = :uid AND organization_id = :oid AND role_id = :rid 
-              AND (term_id IS NULL OR CAST(:tid AS UUID) IS NULL OR term_id = CAST(:tid AS UUID)) AND revoked_at IS NULL
+              AND term_id = CAST(:tid AS UUID) AND revoked_at IS NULL
         """),
         {"uid": user_id, "oid": org_ctx.org_id, "rid": role["id"], "tid": org_ctx.term_id}
     ).scalar()
@@ -218,6 +218,8 @@ def revoke_role(
     org_ctx: OrgContext = Depends(require_permission("users.assign_role")),
     db: Session = Depends(get_db)
 ):
+    if role_code.upper() not in {"TREASURER","EVENT_MANAGER","GATE_STAFF","VOLUNTEER"}:
+        raise HTTPException(403,"Only delegated staff roles can be revoked here")
     role = db.execute(text("SELECT id FROM roles WHERE code = :code"), {"code": role_code.strip().upper()}).mappings().first()
     if not role:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found.")

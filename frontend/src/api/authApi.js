@@ -1,106 +1,42 @@
-import apiClient, { setAccessToken, setCurrentOrgId } from "./axios";
+import apiClient, {
+  clearSession, getAccessToken, loginSession, logoutSession, refreshAccess, setCurrentOrgId,
+} from "./axios";
 
+const applyOrganization = (data) => {
+  setCurrentOrgId(data?.organization?.id || null);
+  return data;
+};
 export const authApi = {
-  login: async (credentials) => {
-    const data = await apiClient.post("/auth/login", {
-      email: credentials.email,
-      password: credentials.password,
-    });
-    if (data?.access_token) {
-      setAccessToken(data.access_token);
-    }
-    if (data?.organization?.id) {
-      setCurrentOrgId(data.organization.id);
-    }
-    return data;
-  },
-
+  login: (credentials) => loginSession({ email: credentials.email, password: credentials.password }),
   getCurrentUser: async () => {
-    const data = await apiClient.get("/auth/me");
-    if (data?.organization?.id) {
-      setCurrentOrgId(data.organization.id);
-    }
-    return data;
+    if (!getAccessToken()) await refreshAccess();
+    return applyOrganization(await apiClient.get("/auth/context"));
   },
-
-  register: async (formData) => {
-    // Strictly omit role/roles field to comply with R4
-    const payload = {
-      name: formData.name,
-      email: formData.email,
-      password: formData.password,
-      student_id: formData.studentId || formData.student_id || undefined,
-      join_code: formData.joinCode || formData.join_code || undefined,
-    };
-    return await apiClient.post("/auth/register", payload);
+  register: (form) => apiClient.post("/auth/register", {
+    full_name: form.name, email: form.email, password: form.password,
+    join_code: form.joinCode?.trim() || undefined,
+    student_id: form.studentId?.trim() || undefined,
+    role: form.role?.trim() || undefined,
+  }),
+  verifyEmail: (token) => apiClient.post("/auth/verify-email", { token }),
+  resendVerification: (email) => apiClient.post("/auth/resend-verification", { email }),
+  forgotPassword: (email) => apiClient.post("/auth/forgot-password", { email }),
+  resetPassword: ({ token, new_password }) => apiClient.post("/auth/reset-password", { token, new_password }),
+  acceptInvite: (data) => apiClient.post("/auth/accept-invite", data),
+  selectOrg: async (organization_id) => applyOrganization(await apiClient.post("/auth/select-org", { organization_id })),
+  joinOrg: async (data) => applyOrganization(await apiClient.post("/auth/join-org", data)),
+  changePassword: async (data) => {
+    const result = await apiClient.post("/auth/change-password", data);
+    clearSession();
+    window.dispatchEvent(new CustomEvent("edvexa:unauthorized"));
+    return result;
   },
-
-  verifyEmail: async (token) => {
-    return await apiClient.get(`/auth/verify-email?token=${encodeURIComponent(token)}`);
-  },
-
-  resendVerification: async (email) => {
-    return await apiClient.post("/auth/resend-verification", { email });
-  },
-
-  acceptInvite: async ({ token, password, full_name }) => {
-    const data = await apiClient.post("/auth/accept-invite", {
-      token,
-      password,
-      full_name,
-    });
-    if (data?.access_token) {
-      setAccessToken(data.access_token);
-    }
-    return data;
-  },
-
-  forgotPassword: async (email) => {
-    return await apiClient.post("/auth/forgot-password", { email });
-  },
-
-  resetPassword: async ({ token, new_password }) => {
-    return await apiClient.post("/auth/reset-password", {
-      token,
-      new_password,
-    });
-  },
-
-  changePassword: async ({ current_password, new_password }) => {
-    return await apiClient.post("/auth/change-password", {
-      current_password,
-      new_password,
-    });
-  },
-
-  selectOrg: async (organization_id) => {
-    const data = await apiClient.post("/auth/select-org", { organization_id });
-    if (data?.access_token) {
-      setAccessToken(data.access_token);
-    }
-    setCurrentOrgId(organization_id);
-    return data;
-  },
-
-  getSessions: async () => {
-    return await apiClient.get("/auth/sessions");
-  },
-
-  logout: async () => {
-    try {
-      await apiClient.post("/auth/logout");
-    } finally {
-      setAccessToken(null);
-    }
-  },
-
+  getSessions: () => apiClient.get("/auth/sessions"),
+  logout: logoutSession,
   logoutAll: async () => {
-    try {
-      await apiClient.post("/auth/logout-all");
-    } finally {
-      setAccessToken(null);
-    }
+    await apiClient.post("/auth/logout-all");
+    clearSession();
+    window.dispatchEvent(new CustomEvent("edvexa:unauthorized"));
   },
 };
-
 export default authApi;

@@ -17,9 +17,9 @@ def resolve_ticket_price(db: Session, user_id: str, org_id: str, ticket_type_id:
         raise ValueError("Ticket type not found.")
 
     if is_member:
-        return float(ticket_type["member_price"]), True
+        return ticket_type["member_price"], True
     else:
-        return float(ticket_type["non_member_price"]), False
+        return ticket_type["non_member_price"], False
 
 def resolve_product_price(db: Session, user_id: str, org_id: str, variant_id: str) -> Tuple[float, bool]:
     is_member = db.execute(
@@ -41,9 +41,9 @@ def resolve_product_price(db: Session, user_id: str, org_id: str, variant_id: st
         raise ValueError("Product variant not found.")
 
     if is_member:
-        return float(prod["member_price"]), True
+        return prod["member_price"], True
     else:
-        return float(prod["base_price"]), False
+        return prod["base_price"], False
 
 def resolve_membership_price(db: Session, org_id: str, plan_id: str) -> float:
     plan = db.execute(
@@ -54,4 +54,4 @@ def resolve_membership_price(db: Session, org_id: str, plan_id: str) -> float:
     if not plan:
         raise ValueError("Membership plan not found or inactive.")
 
-    return float(plan["price"])
+    return plan["price"]

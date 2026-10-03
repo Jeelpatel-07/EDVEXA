@@ -1,60 +1,41 @@
-from typing import Optional, Any
-from pydantic import BaseModel, EmailStr, Field, model_validator
-from datetime import datetime
+from typing import Annotated
+from uuid import UUID
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, AliasChoices, AfterValidator
 
-class RegisterRequest(BaseModel):
-    name: str = Field(..., min_length=2, max_length=255)
-    email: EmailStr
-    password: str = Field(..., min_length=6)
-    confirm_password: Optional[str] = None
-    student_id: Optional[str] = None
-    join_code: Optional[str] = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def check_no_role_fields(cls, values: Any) -> Any:
-        if isinstance(values, dict):
-            if "role" in values or "roles" in values:
-                raise ValueError("Role assignment is forbidden during public registration.")
-        return values
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-class SelectOrgRequest(BaseModel):
-    organization_id: str
-
-class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
-
-class ResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str = Field(..., min_length=6)
-
-class ChangePasswordRequest(BaseModel):
-    old_password: str
-    new_password: str = Field(..., min_length=6)
-
-class AcceptInviteRequest(BaseModel):
-    token: str
-    password: str = Field(..., min_length=6)
-    full_name: Optional[str] = None
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    user: dict
-    organization: Optional[dict] = None
-    roles: list[str] = []
-    permissions: list[str] = []
-    is_member: bool = False
-    membership: Optional[dict] = None
-    persona_label: str = "GUEST"
-
-class AuthSessionResponse(BaseModel):
-    id: str
-    user_agent: Optional[str]
-    ip: Optional[str]
-    last_used_at: datetime
-    is_current: bool = False
+def password_bytes(value):
+    if len(value.encode("utf-8"))>72:
+        raise ValueError("Password must fit in 72 UTF-8 bytes")
+    return value
+Password = Annotated[str,Field(min_length=8,max_length=72),AfterValidator(password_bytes)]
+class StrictModel(BaseModel):
+    model_config=ConfigDict(extra="forbid",populate_by_name=True)
+class RegisterRequest(StrictModel):
+    full_name:str=Field(min_length=2,max_length=120,validation_alias=AliasChoices("full_name","name"))
+    email:EmailStr
+    password:Password
+    student_id:str|None=Field(None,max_length=60)
+    join_code:str|None=Field(None,max_length=50)
+    role:str|None=Field(None,max_length=50)
+class LoginRequest(StrictModel):
+    email:EmailStr
+    password:str=Field(min_length=1,max_length=128)
+class SelectOrgRequest(StrictModel):
+    organization_id:UUID
+class JoinOrgRequest(StrictModel):
+    join_code:str=Field(min_length=1,max_length=50)
+    student_id:str|None=Field(None,max_length=60)
+class ForgotPasswordRequest(StrictModel):
+    email:EmailStr
+class TokenRequest(StrictModel):
+    token:str=Field(min_length=40,max_length=128)
+class ResetPasswordRequest(TokenRequest):
+    new_password:Password
+class ChangePasswordRequest(StrictModel):
+    current_password:str=Field(min_length=1,max_length=128,validation_alias=AliasChoices("current_password","old_password"))
+    new_password:Password
+class AcceptInviteRequest(TokenRequest):
+    password:Password|None=None
+    full_name:str|None=Field(None,min_length=2,max_length=120)
+class ProfileUpdate(StrictModel):
+    full_name:str=Field(min_length=2,max_length=120)
+    phone:str|None=Field(None,max_length=30)

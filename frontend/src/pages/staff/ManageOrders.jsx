@@ -16,7 +16,14 @@ export default function ManageOrders() {
   const fetchOrders = () => {
     orderApi
       .getAllOrders()
-      .then((data) => setOrders(data))
+      .then((data) => {
+        const orderList = Array.isArray(data) ? data : (data?.items || []);
+        setOrders(orderList);
+      })
+      .catch((err) => {
+        console.error("Failed to load orders:", err);
+        setOrders([]);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -27,22 +34,32 @@ export default function ManageOrders() {
   const handleMarkPickedUp = async (orderId) => {
     setUpdatingId(orderId);
     try {
-      await orderApi.updatePickupStatus(orderId, "PICKED_UP");
+      if (typeof orderApi.updatePickupStatus === "function") {
+        await orderApi.updatePickupStatus(orderId, "PICKED_UP");
+      }
       setOrders((prev) =>
         prev.map((o) =>
-          o.id === orderId ? { ...o, pickupStatus: "PICKED_UP" } : o
+          o.id === orderId ? { ...o, pickupStatus: "PICKED_UP", pickup_status: "PICKED_UP" } : o
         )
       );
+    } catch (err) {
+      console.error("Failed to update pickup status:", err);
+      alert("Failed to mark picked up: " + (err.message || "Unknown error"));
     } finally {
       setUpdatingId(null);
     }
   };
 
-  const filtered = orders.filter((o) => {
+  const safeOrders = Array.isArray(orders) ? orders : [];
+  const filtered = safeOrders.filter((o) => {
+    const pickupSt = o.pickupStatus || o.pickup_status || "NOT_APPLICABLE";
+    const ordType = o.type || o.order_type || "UNKNOWN";
     if (filterStatus === "ALL") return true;
-    if (filterStatus === "READY_FOR_PICKUP") return o.pickupStatus === "READY_FOR_PICKUP";
-    if (filterStatus === "PICKED_UP") return o.pickupStatus === "PICKED_UP";
-    return o.type === filterStatus;
+    if (filterStatus === "READY_FOR_PICKUP") return pickupSt === "READY_FOR_PICKUP";
+    if (filterStatus === "PICKED_UP") return pickupSt === "PICKED_UP";
+    if (filterStatus === "MERCHANDISE") return ordType === "MERCHANDISE" || ordType === "MERCH";
+    if (filterStatus === "TICKET") return ordType === "TICKET" || ordType === "TICKETS";
+    return ordType === filterStatus;
   });
 
   const columns = [
@@ -51,69 +68,80 @@ export default function ManageOrders() {
       accessor: "orderNumber",
       render: (row) => (
         <span className="font-mono text-xs font-semibold text-teal-700">
-          {row.orderNumber || row.id}
+          {row.orderNumber || row.order_number || row.id}
         </span>
       ),
     },
     {
       header: "Type",
       accessor: "type",
-      render: (row) => (
-        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">
-          {row.type}
-        </span>
-      ),
+      render: (row) => {
+        const ordType = row.type || row.order_type || "GENERAL";
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 uppercase">
+            {ordType}
+          </span>
+        );
+      },
     },
     {
       header: "Items",
       render: (row) => (
         <span className="text-xs text-foreground font-medium truncate max-w-[220px] block">
-          {row.items?.map((i) => `${i.quantity}× ${i.title}`).join(", ")}
+          {row.items && row.items.length > 0
+            ? row.items.map((i) => `${i.quantity || 1}× ${i.title || i.product_name || i.ticket_name || i.plan_name || "Item"}`).join(", ")
+            : "1× Standard Order"}
         </span>
       ),
     },
     {
       header: "Amount",
       accessor: "totalAmount",
-      render: (row) => (
-        <span className="font-bold text-xs text-foreground">
-          ${row.totalAmount.toFixed(2)}
-        </span>
-      ),
+      render: (row) => {
+        const amt = row.totalAmount != null ? Number(row.totalAmount) : Number(row.total || 0);
+        return (
+          <span className="font-bold text-xs text-foreground">
+            ${isNaN(amt) ? "0.00" : amt.toFixed(2)}
+          </span>
+        );
+      },
     },
     {
       header: "Payment",
       accessor: "status",
-      render: (row) => <StatusBadge status={row.status} />,
+      render: (row) => <StatusBadge status={row.status || "PAID"} />,
     },
     {
       header: "Pickup Status",
       accessor: "pickupStatus",
-      render: (row) =>
-        row.pickupStatus !== "NOT_APPLICABLE" ? (
-          <StatusBadge status={row.pickupStatus} />
+      render: (row) => {
+        const pickupSt = row.pickupStatus || row.pickup_status || "NOT_APPLICABLE";
+        return pickupSt !== "NOT_APPLICABLE" ? (
+          <StatusBadge status={pickupSt} />
         ) : (
           <span className="text-xs text-slate-400">—</span>
-        ),
+        );
+      },
     },
     {
       header: "Desk Action",
       render: (row) => {
-        if (row.pickupStatus === "READY_FOR_PICKUP") {
+        const pickupSt = row.pickupStatus || row.pickup_status || "NOT_APPLICABLE";
+        if (pickupSt === "READY_FOR_PICKUP") {
           return (
             <button
               onClick={() => handleMarkPickedUp(row.id)}
               disabled={updatingId === row.id}
-              className="px-2.5 py-1 rounded-lg bg-teal-600 text-white text-xs font-bold hover:bg-teal-700 shadow-2xs flex items-center gap-1"
+              className="px-2.5 py-1 rounded-lg bg-teal-600 text-white text-xs font-bold hover:bg-teal-700 shadow-2xs flex items-center gap-1 cursor-pointer transition-colors"
             >
               <CheckCircle2 className="w-3 h-3" />
               <span>Mark Picked Up</span>
             </button>
           );
         }
-        if (row.pickupStatus === "PICKED_UP") {
+        if (pickupSt === "PICKED_UP") {
           return (
-            <span className="text-[11px] font-medium text-slate-500">
+            <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
               Collected ✓
             </span>
           );
@@ -149,7 +177,7 @@ export default function ManageOrders() {
           <button
             key={tab.id}
             onClick={() => setFilterStatus(tab.id)}
-            className={`px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap transition-colors cursor-pointer ${
               filterStatus === tab.id
                 ? "bg-teal-600 text-white shadow-2xs"
                 : "text-slate-600 hover:bg-slate-100"

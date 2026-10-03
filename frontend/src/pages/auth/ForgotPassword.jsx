@@ -4,6 +4,7 @@ import { authApi } from "../../api";
 import { Mail, ArrowLeft, CheckCircle2 } from "lucide-react";
 
 export default function ForgotPassword() {
+  const [error, setError] = useState("");
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -11,9 +12,12 @@ export default function ForgotPassword() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setError("");
     try {
       await authApi.forgotPassword(email);
       setSubmitted(true);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -28,17 +32,17 @@ export default function ForgotPassword() {
               <CheckCircle2 className="w-6 h-6" />
             </div>
             <h2 className="text-xl font-bold text-foreground">
-              Recovery Link Sent
+              Check your email
             </h2>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              If an account with <strong>{email}</strong> exists in the student organization registry, a secure reset token has been dispatched.
+              If an account with <strong>{email}</strong> exists in the student organization registry, a reset link will be sent. Open that email to continue.
             </p>
             <div className="pt-2">
               <Link
-                to="/reset-password"
+                to="/login"
                 className="inline-block py-2.5 px-4 rounded-xl bg-teal-600 text-white text-xs font-bold hover:bg-teal-700 shadow-xs"
               >
-                Proceed to Reset Password
+                Back to Sign In
               </Link>
             </div>
           </div>
@@ -54,6 +58,7 @@ export default function ForgotPassword() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
+              {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
               <div>
                 <label className="text-xs font-semibold text-slate-700 block mb-1.5">
                   College Email

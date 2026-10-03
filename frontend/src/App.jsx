@@ -26,6 +26,8 @@ import Register from "./pages/auth/Register";
 import ForgotPassword from "./pages/auth/ForgotPassword";
 import ResetPassword from "./pages/auth/ResetPassword";
 import VerifyEmail from "./pages/auth/VerifyEmail";
+import AcceptInvite from "./pages/auth/AcceptInvite";
+import Organizations from "./pages/auth/Organizations";
 
 // Platform Admin Pages (Section 11 & 30)
 import PlatformDashboard from "./pages/platform/PlatformDashboard";
@@ -122,6 +124,8 @@ export default function App() {
               <Route path="/verify-email" element={<VerifyEmail />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
+              <Route path="/accept-invite" element={<AcceptInvite />} />
+              <Route path="/organizations" element={<ProtectedRoute><Organizations /></ProtectedRoute>} />
             </Route>
 
             {/* Top-Level Role Navigation Aliases (Section 10d) */}
@@ -195,7 +199,7 @@ export default function App() {
               <Route
                 path="manage/members"
                 element={
-                  <PermissionGuard permission={PERMISSIONS.USERS_MANAGE}>
+                  <PermissionGuard permission={PERMISSIONS.MEMBERS_VIEW}>
                     <ManageMembers />
                   </PermissionGuard>
                 }
@@ -203,7 +207,7 @@ export default function App() {
               <Route
                 path="manage/membership-plans"
                 element={
-                  <PermissionGuard permission={PERMISSIONS.USERS_MANAGE}>
+                  <PermissionGuard permission={PERMISSIONS.MEMBERSHIP_PLANS_MANAGE}>
                     <ManageMembershipPlans />
                   </PermissionGuard>
                 }
@@ -265,7 +269,7 @@ export default function App() {
               <Route
                 path="manage/orders"
                 element={
-                  <PermissionGuard permission={PERMISSIONS.PRODUCTS_MANAGE}>
+                  <PermissionGuard permission={PERMISSIONS.ORDERS_VIEW_ALL}>
                     <ManageOrders />
                   </PermissionGuard>
                 }
@@ -333,7 +337,7 @@ export default function App() {
               <Route
                 path="manage/finance"
                 element={
-                  <PermissionGuard permission={PERMISSIONS.FINANCE_VIEW}>
+                  <PermissionGuard anyPermissions={[PERMISSIONS.FINANCE_VIEW, PERMISSIONS.FINANCE_VIEW_SUMMARY]}>
                     <FinanceDashboard />
                   </PermissionGuard>
                 }
@@ -358,7 +362,7 @@ export default function App() {
               <Route
                 path="manage/reports"
                 element={
-                  <PermissionGuard permission={PERMISSIONS.FINANCE_VIEW}>
+                  <PermissionGuard anyPermissions={[PERMISSIONS.FINANCE_REPORT, PERMISSIONS.FINANCE_VIEW]}>
                     <FinanceReports />
                   </PermissionGuard>
                 }

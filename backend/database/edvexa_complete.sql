@@ -1,3 +1,16 @@
+-- EDVEXA: run this entire file in pgAdmin or psql. No automatic deletion.
+-- Existing incompatible schemas fail BEFORE any change and the transaction rolls back.
+BEGIN;
+DO $install$ BEGIN
+ PERFORM pg_advisory_xact_lock(2036100301);
+ IF to_regclass('public.platform_settings') IS NOT NULL THEN
+   IF EXISTS(SELECT 1 FROM platform_settings WHERE key='schema_version' AND value='"2026.10.recovery.1"'::jsonb) THEN RETURN; END IF;
+   RAISE EXCEPTION 'Existing incompatible EDVEXA schema. Back it up and use a separate empty database; do not reset user data.';
+ END IF;
+ IF EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE') THEN
+   RAISE EXCEPTION 'Existing tables found. Back up and use a separate empty database.';
+ END IF;
+ EXECUTE $schema_data$
 -- ========================================================
 -- EDVEXA COMPLETE DATABASE SCHEMA & INITIALIZATION SCRIPT
 -- Runnable top-to-bottom in psql / pgAdmin Query Tool
@@ -1110,9 +1123,100 @@ GROUP BY f.id, f.organization_id, f.name, f.goal_amount, f.raised_amount;
 -- ========================================================
 
 -- Enable platform admin seed trigger bypass ONLY for this block
-SET app.allow_platform_admin_seed = 'on';
+
 
 -- 13.1 ROLES (Exactly 6 stored roles per R1)
+
+ALTER TABLE users ADD COLUMN credential_version INTEGER NOT NULL DEFAULT 1 CHECK (credential_version > 0);
+ALTER TABLE refresh_tokens ADD COLUMN credential_version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE invitations ADD COLUMN term_id UUID;
+ALTER TABLE invitations ALTER COLUMN organization_id SET NOT NULL;
+ALTER TABLE invitations ADD CONSTRAINT uq_invitation_token UNIQUE (token_hash);
+ALTER TABLE auth_tokens ADD CONSTRAINT uq_auth_token UNIQUE (token_hash);
+ALTER TABLE user_roles ADD CONSTRAINT fk_role_term_org FOREIGN KEY (term_id, organization_id) REFERENCES academic_terms(id, organization_id);
+ALTER TABLE user_roles ADD CONSTRAINT fk_role_org_user FOREIGN KEY (organization_id, user_id) REFERENCES organization_users(organization_id, user_id);
+ALTER TABLE invitations ADD CONSTRAINT fk_invite_term_org FOREIGN KEY (term_id, organization_id) REFERENCES academic_terms(id, organization_id);
+ALTER TABLE academic_terms ADD CONSTRAINT term_dates CHECK (end_date > start_date);
+ALTER TABLE membership_plans ADD CONSTRAINT positive_plan CHECK (price >= 0 AND duration_days > 0);
+ALTER TABLE membership_benefits ADD CONSTRAINT positive_benefit CHECK (discount_value >= 0 AND (discount_type <> 'PERCENT' OR discount_value <= 100));
+ALTER TABLE tasks ADD CONSTRAINT fk_task_fundraiser_org FOREIGN KEY (fundraiser_id, organization_id) REFERENCES fundraisers(id, organization_id);
+ALTER TABLE memberships ADD CONSTRAINT fk_member_org_user FOREIGN KEY (organization_id, user_id) REFERENCES organization_users(organization_id, user_id);
+ALTER TABLE orders ADD CONSTRAINT fk_order_org_user FOREIGN KEY (organization_id, user_id) REFERENCES organization_users(organization_id, user_id);
+ALTER TABLE task_assignments ADD CONSTRAINT fk_assignment_org_user FOREIGN KEY (organization_id, user_id) REFERENCES organization_users(organization_id, user_id);
+ALTER TABLE expense_claims ADD CONSTRAINT fk_claim_org_user FOREIGN KEY (organization_id, user_id) REFERENCES organization_users(organization_id, user_id);
+CREATE INDEX ix_refresh_family ON refresh_tokens (family_id, revoked_at);
+CREATE INDEX ix_refresh_user ON refresh_tokens (user_id, revoked_at);
+CREATE UNIQUE INDEX uq_live_membership ON memberships (organization_id, user_id) WHERE status = 'ACTIVE';
+
+CREATE OR REPLACE FUNCTION fn_check_role_scope() RETURNS TRIGGER AS $$
+DECLARE role_scope role_scope_enum; BEGIN
+ SELECT scope INTO role_scope FROM roles WHERE id=NEW.role_id;
+ IF (role_scope='PLATFORM') <> (NEW.organization_id IS NULL) THEN
+   RAISE EXCEPTION 'Role scope and organization do not match';
+ END IF;
+ IF role_scope='ORGANIZATION' AND NEW.term_id IS NULL THEN
+   RAISE EXCEPTION 'Organization roles require an academic term';
+ END IF;
+ RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION fn_user_permissions(p_user_id UUID, p_org_id UUID)
+RETURNS TABLE(permission_code VARCHAR) AS $$
+ SELECT DISTINCT p.code::VARCHAR FROM user_roles ur
+ JOIN roles r ON r.id=ur.role_id JOIN role_permissions rp ON rp.role_id=r.id
+ JOIN permissions p ON p.id=rp.permission_id
+ JOIN users u ON u.id=ur.user_id AND u.status='ACTIVE'
+ LEFT JOIN academic_terms t ON t.id=ur.term_id AND t.organization_id=ur.organization_id
+ LEFT JOIN organization_users ou ON ou.user_id=ur.user_id AND ou.organization_id=ur.organization_id
+ LEFT JOIN organizations o ON o.id=ur.organization_id
+ WHERE ur.user_id=p_user_id AND ur.revoked_at IS NULL AND ur.valid_from<=now()
+ AND (ur.valid_to IS NULL OR ur.valid_to>now())
+ AND ((p_org_id IS NULL AND ur.organization_id IS NULL AND r.code='PLATFORM_ADMIN')
+ OR (p_org_id=ur.organization_id AND ou.status='ACTIVE' AND o.status='ACTIVE'
+ AND t.is_current AND CURRENT_DATE BETWEEN t.start_date AND t.end_date));
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION fn_guard_platform_admin() RETURNS TRIGGER AS $$
+BEGIN
+ IF EXISTS(SELECT 1 FROM roles WHERE id=NEW.role_id AND code='PLATFORM_ADMIN')
+ AND (TG_OP='INSERT' OR NEW.role_id IS DISTINCT FROM OLD.role_id OR NEW.user_id IS DISTINCT FROM OLD.user_id)
+ AND current_setting('app.allow_platform_admin_seed',true) IS DISTINCT FROM 'on' THEN
+   RAISE EXCEPTION 'PLATFORM_ADMIN can only be created by the controlled seed';
+ END IF;
+ RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+
+-- Serialize administrator changes and cover suspension as well as role revocation.
+CREATE OR REPLACE FUNCTION fn_keep_org_admin() RETURNS TRIGGER AS $$
+DECLARE oid UUID; BEGIN
+ oid:=COALESCE(NEW.organization_id,OLD.organization_id);
+ PERFORM 1 FROM organizations WHERE id=oid FOR UPDATE;
+ IF EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id
+    WHERE ur.organization_id=oid AND r.code='ORG_ADMIN')
+ AND NOT EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id
+   JOIN users u ON u.id=ur.user_id AND u.status='ACTIVE'
+   JOIN organization_users ou ON ou.user_id=ur.user_id AND ou.organization_id=ur.organization_id AND ou.status='ACTIVE'
+   JOIN academic_terms t ON t.id=ur.term_id AND t.is_current
+   WHERE ur.organization_id=oid AND r.code='ORG_ADMIN' AND ur.revoked_at IS NULL
+   AND ur.valid_from<=now() AND (ur.valid_to IS NULL OR ur.valid_to>now())
+   AND CURRENT_DATE BETWEEN t.start_date AND t.end_date) THEN
+   RAISE EXCEPTION 'Organization must retain an active administrator in its current term';
+ END IF;
+ RETURN NULL;
+END; $$ LANGUAGE plpgsql;
+CREATE CONSTRAINT TRIGGER trg_keep_admin_roles AFTER UPDATE OR DELETE ON user_roles
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fn_keep_org_admin();
+CREATE CONSTRAINT TRIGGER trg_keep_admin_users AFTER UPDATE OR DELETE ON organization_users
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fn_keep_org_admin();
+
+$schema_data$; END; $install$;
+-- Idempotent seed; existing accounts and their passwords are never overwritten.
+DO $seed_guard$ BEGIN
+ PERFORM pg_advisory_xact_lock(2036100301);
+ IF EXISTS(SELECT 1 FROM platform_settings WHERE key='seed_version') THEN RETURN; END IF;
+ IF EXISTS(SELECT 1 FROM users) THEN RAISE EXCEPTION 'Existing data found: seed skipped to preserve it. Use a separate empty database for sample data.'; END IF;
+ EXECUTE $seed_data$
+SET LOCAL app.allow_platform_admin_seed = 'on';
 INSERT INTO roles (id, code, name, scope, is_system, is_assignable_via_api, created_by_role, description) VALUES
 ('11111111-1111-1111-1111-111111111101', 'PLATFORM_ADMIN', 'Platform Administrator', 'PLATFORM', true, false, 'NONE', 'Global platform governance and tenant operations. Seed only.'),
 ('11111111-1111-1111-1111-111111111102', 'ORG_ADMIN', 'Organization Administrator', 'ORGANIZATION', true, false, 'PLATFORM_ADMIN', 'Full control over club resources, staff roles, and settings.'),
@@ -1396,7 +1500,7 @@ INSERT INTO user_roles (user_id, role_id, organization_id, term_id, valid_from) 
 -- (Note: MEMBER and GUEST are NEVER stored in roles/user_roles per R1. They are derived from memberships!)
 
 -- Reset bypass
-RESET app.allow_platform_admin_seed;
+SELECT set_config('app.allow_platform_admin_seed','off',true);
 
 -- 13.7 MEMBERSHIP PLANS & BENEFITS (EDVEXA Student Association)
 INSERT INTO membership_plans (id, organization_id, name, description, price, duration_days, is_active) VALUES
@@ -1580,3 +1684,29 @@ INSERT INTO audit_logs (organization_id, actor_email, action, target_type, targe
 ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'treasurer1@edvexa.edu', 'CLAIM_REIMBURSE', 'EXPENSE_CLAIM', 'ffffffff-1111-1111-1111-ffffffff0003', '{"amount": 2200.00, "claim_number": "EDV-CLM-2026-00003"}'::jsonb);
 
 -- End of complete SQL script
+
+-- Reconcile inventory with real seeded purchases rather than invented sold counters.
+UPDATE ticket_types tt SET quantity_sold=COALESCE((SELECT SUM(oi.quantity) FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE oi.ticket_type_id=tt.id AND o.status IN ('PAID','FULFILLED','PENDING')),0);
+UPDATE ticket_types SET quantity_total=2, max_per_order=2 WHERE id='99999999-9999-9999-9999-999999999911';
+UPDATE product_variants SET stock_quantity=0 WHERE sku='EDV-TS-WHITE-XL';
+UPDATE orders SET subtotal=total+discount_total;
+UPDATE users SET status='PENDING_EMAIL_VERIFICATION',email_verified_at=NULL WHERE email='student7@edvexa.edu';
+UPDATE organization_users SET status='SUSPENDED' WHERE user_id=(SELECT id FROM users WHERE email='student8@edvexa.edu');
+INSERT INTO memberships(organization_id,user_id,plan_id,member_number,status,payment_status,start_date,end_date,qr_token)
+VALUES('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','66666666-6666-6666-6666-666666666623','77777777-7777-7777-7777-777777777702','EDV-MEM-2026-00005','EXPIRED','PAID',CURRENT_DATE-200,CURRENT_DATE-20,encode(gen_random_bytes(32),'hex'));
+INSERT INTO tasks(organization_id,title,description,status,priority,fundraiser_id,created_by)
+VALUES('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Clean up after bake sale','Return equipment and sort recycling','TODO','MEDIUM','cccccccc-1111-1111-1111-cccccccccccc','66666666-6666-6666-6666-666666666603');
+INSERT INTO task_assignments(organization_id,task_id,user_id)
+SELECT organization_id,id,'66666666-6666-6666-6666-666666666612' FROM tasks WHERE title='Clean up after bake sale';
+INSERT INTO announcements(organization_id,author_id,title,content,category,audience,publish_at)
+VALUES('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','66666666-6666-6666-6666-666666666603','Membership renewal deadline','Renew your plan before the semester closes.','DEADLINE','ALL',now()+interval '2 days');
+INSERT INTO notifications(organization_id,user_id,title,message,type,channel,status)
+SELECT ou.organization_id,ou.user_id,a.title,a.content,'ANNOUNCEMENT','IN_APP','SENT'
+FROM organization_users ou JOIN announcements a ON a.organization_id=ou.organization_id
+WHERE a.published_at<=now() AND a.audience='ALL' AND ou.status='ACTIVE';
+UPDATE memberships SET order_id='00000000-1111-1111-1111-000000000001' WHERE id='88888888-8888-8888-8888-888888888801';
+INSERT INTO platform_settings(key,value) VALUES ('schema_version','"2026.10.recovery.1"'),('seed_version','"2026.10.recovery.1"');
+
+$seed_data$; END; $seed_guard$;
+
+COMMIT;

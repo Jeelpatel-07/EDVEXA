@@ -15,13 +15,22 @@ export default function ManageClaims() {
   useEffect(() => {
     claimApi
       .getAllClaims()
-      .then((data) => setClaims(data))
+      .then((data) => setClaims(Array.isArray(data) ? data : (data?.items || [])))
+      .catch((err) => {
+        console.error("Failed to load claims:", err);
+        setClaims([]);
+      })
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = claims.filter((c) => {
+  const safeClaims = Array.isArray(claims) ? claims : [];
+  const filtered = safeClaims.filter((c) => {
     if (filter === "ALL") return true;
-    return c.status === filter;
+    const st = (c.status || "").toUpperCase();
+    if (filter === "SUBMITTED" || filter === "UNDER_REVIEW") {
+      return st === "SUBMITTED" || st === "UNDER_REVIEW" || st === "PENDING";
+    }
+    return st === filter;
   });
 
   const columns = [
@@ -30,7 +39,7 @@ export default function ManageClaims() {
       accessor: "claimNumber",
       render: (row) => (
         <span className="font-mono text-xs font-semibold text-teal-700">
-          {row.claimNumber || row.id}
+          {row.claimNumber || row.claim_number || row.id}
         </span>
       ),
     },
@@ -39,7 +48,7 @@ export default function ManageClaims() {
       accessor: "claimantName",
       render: (row) => (
         <span className="font-semibold text-xs text-foreground">
-          {row.claimantName}
+          {row.claimantName || row.claimant_name || row.full_name || "Volunteer"}
         </span>
       ),
     },
@@ -47,33 +56,40 @@ export default function ManageClaims() {
       header: "Purpose",
       accessor: "purpose",
       render: (row) => (
-        <span className="text-xs text-foreground truncate max-w-[200px] block">
-          {row.purpose}
+        <span className="text-xs text-foreground truncate max-w-[220px] block">
+          {row.purpose || row.description || row.title || "Reimbursement claim"}
         </span>
       ),
     },
     {
       header: "Amount",
       accessor: "amount",
-      render: (row) => (
-        <span className="font-bold text-xs text-foreground">
-          ${row.amount.toFixed(2)}
-        </span>
-      ),
+      render: (row) => {
+        const amt = Number(row.amount || 0);
+        return (
+          <span className="font-bold text-xs text-foreground">
+            ${isNaN(amt) ? "0.00" : amt.toFixed(2)}
+          </span>
+        );
+      },
     },
     {
       header: "Submitted",
       accessor: "submittedAt",
-      render: (row) => (
-        <span className="text-xs text-muted-foreground">
-          {new Date(row.submittedAt).toLocaleDateString()}
-        </span>
-      ),
+      render: (row) => {
+        const rawDate = row.submittedAt || row.created_at;
+        const validDate = rawDate && !isNaN(new Date(rawDate).getTime());
+        return (
+          <span className="text-xs text-muted-foreground">
+            {validDate ? new Date(rawDate).toLocaleDateString() : "—"}
+          </span>
+        );
+      },
     },
     {
       header: "Status",
       accessor: "status",
-      render: (row) => <StatusBadge status={row.status} />,
+      render: (row) => <StatusBadge status={row.status || "SUBMITTED"} />,
     },
     {
       header: "Action",
@@ -97,18 +113,24 @@ export default function ManageClaims() {
       />
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-2 border-b border-border pb-3 text-xs">
-        {["ALL", "UNDER_REVIEW", "APPROVED", "REIMBURSED", "REJECTED"].map((st) => (
+      <div className="flex items-center gap-2 border-b border-border pb-3 text-xs overflow-x-auto">
+        {[
+          { id: "ALL", label: "All Claims" },
+          { id: "SUBMITTED", label: "Awaiting Audit (Submitted)" },
+          { id: "APPROVED", label: "Approved (Queued for Payout)" },
+          { id: "REIMBURSED", label: "Reimbursed & Disbursed" },
+          { id: "REJECTED", label: "Rejected" },
+        ].map((tab) => (
           <button
-            key={st}
-            onClick={() => setFilter(st)}
-            className={`px-3 py-1.5 rounded-lg font-semibold transition-colors ${
-              filter === st
+            key={tab.id}
+            onClick={() => setFilter(tab.id)}
+            className={`px-3 py-1.5 rounded-lg font-semibold transition-colors whitespace-nowrap cursor-pointer ${
+              filter === tab.id
                 ? "bg-teal-600 text-white shadow-2xs"
                 : "text-slate-600 hover:bg-slate-100"
             }`}
           >
-            {st.replace("_", " ")}
+            {tab.label}
           </button>
         ))}
       </div>

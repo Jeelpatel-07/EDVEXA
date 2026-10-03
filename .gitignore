@@ -1,44 +1,44 @@
-# Dependencies
-node_modules/
-*/node_modules/
+# Python virtual environments
+.venv/
+.test-venv/
 
-# Production builds
-dist/
-dist-ssr/
-*/dist/
-
-# Environment variables
+# Private environment configuration
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
-# Python
+# Python generated files
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
-*.venv
+*.egg-info/
 
-# Logs
-logs/
+# Test and lint caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Build output
+build/
+dist/
+
+# Temporary local files
+install-test.log
+write-probe.txt
+python-write-probe.txt
+.uv-cache/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+*.dump
+work/
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
+# Uploaded runtime receipts
+backend/uploads/receipts/*
+!backend/uploads/receipts/.gitkeep
+
+# Frontend dependencies
+node_modules/
+
+# Editor configuration
 .idea/
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+.vscode/

@@ -14,6 +14,7 @@ import {
   Clock,
   Sparkles,
   Shield,
+  Calendar,
 } from "lucide-react";
 import StatCard from "../../components/common/StatCard";
 import StatusBadge from "../../components/common/StatusBadge";
@@ -29,13 +30,13 @@ export default function Dashboard() {
   const [announcements, setAnnouncements] = useState([]);
 
   useEffect(() => {
-    ticketApi.getMyTickets().then((data) => setTickets(data));
-    orderApi.getMyOrders().then((data) => setOrders(data));
-    taskApi.getMyTasks().then((data) => setTasks(data));
-    announcementApi.getAnnouncements().then((data) => setAnnouncements(data.slice(0, 2)));
+    ticketApi.getMyTickets().then((data) => setTickets(Array.isArray(data) ? data : [])).catch(() => setTickets([]));
+    orderApi.getMyOrders().then((data) => setOrders(Array.isArray(data) ? data : [])).catch(() => setOrders([]));
+    taskApi.getMyTasks().then((data) => setTasks(Array.isArray(data) ? data : [])).catch(() => setTasks([]));
+    announcementApi.getAnnouncements().then((data) => setAnnouncements(Array.isArray(data) ? data.slice(0, 2) : [])).catch(() => setAnnouncements([]));
   }, []);
 
-  const activeTicket = tickets.find((t) => t.status === "ISSUED");
+  const activeTicket = Array.isArray(tickets) ? tickets.find((t) => t.status === "ISSUED" || t.status === "VALID") : null;
 
   return (
     <div className="space-y-6">

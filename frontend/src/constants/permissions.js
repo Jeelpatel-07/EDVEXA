@@ -8,34 +8,56 @@
 
 export const PERMISSIONS = {
   // Platform Level
-  ORGANIZATIONS_MANAGE: "organizations.manage",
+  ORGANIZATION_CREATE: "organization.create",
+  ORGANIZATION_VIEW: "organization.view",
+  ORGANIZATION_UPDATE: "organization.update",
+  ORGANIZATION_SUSPEND: "organization.suspend",
+  ORGANIZATION_ADMIN_CREATE: "organization.admin.create",
+  PLATFORM_SETTINGS_MANAGE: "platform.settings.manage",
+  PLATFORM_AUDIT_VIEW: "platform.audit.view",
+  PLATFORM_ANALYTICS_VIEW: "platform.analytics.view",
+  SUBSCRIPTION_MANAGE: "subscription.manage",
+  ORGANIZATIONS_MANAGE: "organization.view",
 
   // Organization Users & Roles
-  USERS_MANAGE: "users.manage",
-  ROLES_MANAGE: "roles.manage",
+  USERS_VIEW: "users.view",
+  USERS_INVITE: "users.invite",
+  USERS_ASSIGN_ROLE: "users.assign_role",
+  USERS_MANAGE: "users.assign_role",
+  ROLES_MANAGE: "users.assign_role",
+  ORGANIZATION_SETTINGS_UPDATE: "organization.settings.update",
+  AUDIT_VIEW_ORG: "audit.view_org",
+
+  // Members & Plans
+  MEMBERS_VIEW: "members.view",
+  MEMBERS_MANAGE: "members.manage",
+  MEMBERSHIP_PLANS_MANAGE: "membership.plans.manage",
 
   // Events & Ticketing
   EVENTS_CREATE: "events.create",
   EVENTS_UPDATE: "events.update",
   EVENTS_DELETE: "events.delete",
-  EVENTS_MANAGE: "events.manage",
+  EVENTS_MANAGE: "events.update",
   TICKETS_MANAGE: "tickets.manage",
   TICKETS_SCAN: "tickets.scan",
-  TICKETS_CHECKIN: "tickets.checkin",
+  TICKETS_CHECKIN: "tickets.scan",
+  TICKETS_REFUND: "tickets.refund",
+
+  // Products & Inventory
+  PRODUCTS_MANAGE: "products.manage",
+  PRODUCTS_MANAGE_STOCK: "products.manage_stock",
+  INVENTORY_MANAGE: "products.manage_stock",
 
   // Announcements
   ANNOUNCEMENTS_CREATE: "announcements.create",
   ANNOUNCEMENTS_UPDATE: "announcements.update",
-  ANNOUNCEMENTS_PUBLISH: "announcements.publish",
-  ANNOUNCEMENTS_MANAGE: "announcements.manage",
-
-  // Products & Inventory
-  PRODUCTS_MANAGE: "products.manage",
-  INVENTORY_MANAGE: "inventory.manage",
+  ANNOUNCEMENTS_DELETE: "announcements.delete",
+  ANNOUNCEMENTS_PUBLISH: "announcements.create",
+  ANNOUNCEMENTS_MANAGE: "announcements.create",
 
   // Fundraisers & Tasks
   FUNDRAISERS_MANAGE: "fundraisers.manage",
-  TASKS_CREATE: "tasks.create",
+  TASKS_CREATE: "tasks.assign",
   TASKS_ASSIGN: "tasks.assign",
   TASKS_UPDATE_OWN: "tasks.update_own",
 
@@ -46,10 +68,13 @@ export const PERMISSIONS = {
 
   // Financial Governance
   FINANCE_VIEW: "finance.view",
-  FINANCE_READ_ONLY: "finance.read_only",
-  FINANCE_MANAGE: "finance.manage",
+  FINANCE_REPORT: "finance.report",
+  FINANCE_VIEW_SUMMARY: "finance.view_summary",
+  FINANCE_READ_ONLY: "finance.view_summary",
+  FINANCE_MANAGE: "finance.view",
+  ORDERS_VIEW_ALL: "orders.view_all",
 
-  // Commerce & Own Data
+  // Commerce & Personal
   ORDERS_PURCHASE: "orders.purchase",
   ORDERS_VIEW_OWN: "orders.view_own",
   MEMBERSHIP_VIEW_OWN: "membership.view_own",

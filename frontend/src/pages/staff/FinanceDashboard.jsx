@@ -141,25 +141,25 @@ export default function FinanceDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Closing Cash Balance"
-          value={`$${finance.closingCash.toFixed(2)}`}
+          value={`$${Number(finance?.closingCash ?? finance?.net_balance ?? 0).toFixed(2)}`}
           subtext="Net available treasury"
           icon={DollarSign}
         />
         <StatCard
           title="Money Received"
-          value={`$${finance.moneyReceived.toFixed(2)}`}
+          value={`$${Number(finance?.moneyReceived ?? finance?.total_revenue ?? 0).toFixed(2)}`}
           subtext="Memberships, tickets & merch"
           icon={TrendingUp}
         />
         <StatCard
           title="Reimbursements Paid"
-          value={`$${finance.reimbursements.toFixed(2)}`}
+          value={`$${Number(finance?.reimbursements ?? 0).toFixed(2)}`}
           subtext="Approved volunteer payouts"
           icon={FileSpreadsheet}
         />
         <StatCard
           title="Approved Claims Pending"
-          value={`$${finance.approvedClaimsAwaitingPayment.toFixed(2)}`}
+          value={`$${Number(finance?.approvedClaimsAwaitingPayment ?? finance?.pending_claims_amount ?? 0).toFixed(2)}`}
           subtext="Awaiting disbursement batch"
           icon={TrendingDown}
         />
@@ -174,42 +174,42 @@ export default function FinanceDashboard() {
           <div className="p-3 rounded-xl bg-slate-50 border border-border">
             <span className="text-muted-foreground block text-[11px]">Opening Balance</span>
             <span className="font-bold text-foreground text-sm mt-0.5 block">
-              ${finance.openingBalance.toFixed(2)}
+              ${Number(finance?.openingBalance || 0).toFixed(2)}
             </span>
           </div>
 
           <div className="p-3 rounded-xl bg-emerald-50/60 border border-emerald-200">
             <span className="text-emerald-800 block text-[11px]">Money Received (+)</span>
             <span className="font-bold text-emerald-800 text-sm mt-0.5 block">
-              ${finance.moneyReceived.toFixed(2)}
+              ${Number(finance?.moneyReceived ?? finance?.total_revenue ?? 0).toFixed(2)}
             </span>
           </div>
 
           <div className="p-3 rounded-xl bg-rose-50/60 border border-rose-200">
             <span className="text-rose-800 block text-[11px]">Refunds (-)</span>
             <span className="font-bold text-rose-800 text-sm mt-0.5 block">
-              ${finance.refunds.toFixed(2)}
+              ${Number(finance?.refunds || 0).toFixed(2)}
             </span>
           </div>
 
           <div className="p-3 rounded-xl bg-rose-50/60 border border-rose-200">
             <span className="text-rose-800 block text-[11px]">Reimbursements (-)</span>
             <span className="font-bold text-rose-800 text-sm mt-0.5 block">
-              ${finance.reimbursements.toFixed(2)}
+              ${Number(finance?.reimbursements || 0).toFixed(2)}
             </span>
           </div>
 
           <div className="p-3 rounded-xl bg-rose-50/60 border border-rose-200">
             <span className="text-rose-800 block text-[11px]">Other Expenses (-)</span>
             <span className="font-bold text-rose-800 text-sm mt-0.5 block">
-              ${finance.otherExpenses.toFixed(2)}
+              ${Number(finance?.otherExpenses || 0).toFixed(2)}
             </span>
           </div>
 
           <div className="p-3 rounded-xl bg-teal-50 border border-teal-200">
             <span className="text-teal-900 block text-[11px] font-bold">Closing Cash (=)</span>
             <span className="font-black text-teal-800 text-sm mt-0.5 block">
-              ${finance.closingCash.toFixed(2)}
+              ${Number(finance?.closingCash ?? finance?.net_balance ?? 0).toFixed(2)}
             </span>
           </div>
         </div>
@@ -227,7 +227,7 @@ export default function FinanceDashboard() {
                 <span className="font-semibold text-foreground">Memberships</span>
               </div>
               <span className="font-bold text-teal-700">
-                ${finance.incomeBreakdown?.memberships.toFixed(2)}
+                ${Number(finance?.incomeBreakdown?.memberships || 0).toFixed(2)}
               </span>
             </div>
 
@@ -237,7 +237,7 @@ export default function FinanceDashboard() {
                 <span className="font-semibold text-foreground">Event Tickets</span>
               </div>
               <span className="font-bold text-teal-700">
-                ${finance.incomeBreakdown?.tickets.toFixed(2)}
+                ${Number(finance?.incomeBreakdown?.tickets || 0).toFixed(2)}
               </span>
             </div>
 
@@ -247,7 +247,7 @@ export default function FinanceDashboard() {
                 <span className="font-semibold text-foreground">Merchandise</span>
               </div>
               <span className="font-bold text-teal-700">
-                ${finance.incomeBreakdown?.merchandise.toFixed(2)}
+                ${Number(finance?.incomeBreakdown?.merchandise || 0).toFixed(2)}
               </span>
             </div>
 
@@ -257,7 +257,7 @@ export default function FinanceDashboard() {
                 <span className="font-semibold text-foreground">Fundraisers</span>
               </div>
               <span className="font-bold text-teal-700">
-                ${finance.incomeBreakdown?.fundraisers.toFixed(2)}
+                ${Number(finance?.incomeBreakdown?.fundraisers || 0).toFixed(2)}
               </span>
             </div>
           </div>

@@ -12,7 +12,7 @@ from app.deps import get_current_org_context, require_permission, OrgContext, ge
 from app.schemas.finance import ExpenseReviewRequest, ManualLedgerEntryRequest, BudgetCategoryCreate, TermBudgetSetRequest
 from app.services.finance_service import (
     submit_expense_claim, review_expense_claim, reimburse_expense_claim,
-    get_finance_summary, export_finance_csv
+    get_finance_summary, get_finance_reports, export_finance_csv
 )
 
 router = APIRouter(prefix="/orgs/{org_id}/finance", tags=["Finance & Treasury"])
@@ -23,6 +23,14 @@ def get_summary(
     db: Session = Depends(get_db)
 ):
     return get_finance_summary(db, org_ctx.org_id)
+
+@router.get("/reports")
+def get_reports(
+    timeframe: Optional[str] = None,
+    org_ctx: OrgContext = Depends(require_permission("finance.view_summary")),
+    db: Session = Depends(get_db)
+):
+    return get_finance_reports(db, org_ctx.org_id, timeframe)
 
 @router.get("/ledger")
 def get_ledger(
@@ -105,6 +113,36 @@ def list_budget_categories(
     ).mappings().all()
     return [dict(c) for c in cats]
 
+def _format_claim(row: dict) -> dict:
+    d = dict(row)
+    d["id"] = str(d["id"])
+    if d.get("organization_id"):
+        d["organization_id"] = str(d["organization_id"])
+    if d.get("user_id"):
+        d["user_id"] = str(d["user_id"])
+    if d.get("category_id"):
+        d["category_id"] = str(d["category_id"])
+    if d.get("term_id"):
+        d["term_id"] = str(d["term_id"])
+    if d.get("reviewed_by"):
+        d["reviewed_by"] = str(d["reviewed_by"])
+    d["amount"] = float(d.get("amount") or 0.0)
+    d["created_at"] = str(d.get("created_at"))
+    if d.get("updated_at"):
+        d["updated_at"] = str(d["updated_at"])
+    if d.get("reviewed_at"):
+        d["reviewed_at"] = str(d["reviewed_at"])
+    if d.get("reimbursed_at"):
+        d["reimbursed_at"] = str(d["reimbursed_at"])
+    # CamelCase aliases for frontend
+    d["claimNumber"] = d.get("claim_number")
+    d["claimantName"] = d.get("claimant_name") or d.get("full_name") or "Organization Member"
+    d["category"] = d.get("category_name") or "General Operations"
+    d["submittedAt"] = d.get("created_at")
+    d["purpose"] = d.get("description") or d.get("title") or "Organization expense"
+    d["receiptUrl"] = d.get("receipt_url")
+    return d
+
 @router.get("/claims")
 def list_claims(
     current_user: dict = Depends(get_current_user),
@@ -132,7 +170,7 @@ def list_claims(
 
     query += " ORDER BY ec.created_at DESC"
     rows = db.execute(text(query), params).mappings().all()
-    return [dict(r) for r in rows]
+    return [_format_claim(dict(r)) for r in rows]
 
 @router.post("/claims", status_code=status.HTTP_201_CREATED)
 async def submit_claim(
@@ -151,10 +189,16 @@ async def submit_claim(
 
     # Save receipt to uploads/receipts
     ext = os.path.splitext(receipt.filename)[1].lower()
-    receipt_filename = f"{uuid.uuid4().hex[:12]}_{receipt.filename}"
+    if ext not in {".pdf", ".png", ".jpg", ".jpeg"}:
+        raise HTTPException(422,"Receipt must be a PDF, PNG or JPEG")
+    receipt_filename = f"{uuid.uuid4().hex}{ext}"
     save_path = settings.UPLOAD_DIR / "receipts" / receipt_filename
 
-    content = await receipt.read()
+    content = await receipt.read(5 * 1024 * 1024 + 1)
+    if not content or len(content)>5 * 1024 * 1024:
+        raise HTTPException(422,"Receipt must be nonempty and no larger than 5 MB")
+    if not (content.startswith(b"%PDF-") or content.startswith(b"\x89PNG\r\n\x1a\n") or content.startswith(b"\xff\xd8\xff")):
+        raise HTTPException(422,"Receipt content does not match a supported document")
     with open(save_path, "wb") as f:
         f.write(content)
 
@@ -210,8 +254,11 @@ def get_claim(
         {"cid": claim_id}
     ).mappings().all()
 
-    res = dict(claim)
+    res = _format_claim(claim)
     res["receipts"] = [dict(r) for r in receipts]
+    if res.get("receipts") and not res.get("receiptUrl"):
+        res["receiptUrl"] = res["receipts"][0].get("file_url")
+        res["receipt_url"] = res["receipts"][0].get("file_url")
     return res
 
 @router.post("/claims/{claim_id}/approve")
@@ -229,28 +276,29 @@ def approve_claim(
             reviewer_user_id=str(current_user["id"]),
             action="APPROVE"
         )
-        return updated
+        return _format_claim(updated)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 @router.post("/claims/{claim_id}/reject")
 def reject_claim(
     claim_id: str,
-    req: ExpenseReviewRequest,
+    req: Optional[ExpenseReviewRequest] = None,
     current_user: dict = Depends(get_current_user),
     org_ctx: OrgContext = Depends(require_permission("expenses.approve")),
     db: Session = Depends(get_db)
 ):
     try:
+        reason = (req.reject_reason or req.reason if req else None) or "Claim rejected by treasurer."
         updated = review_expense_claim(
             db=db,
             claim_id=claim_id,
             org_id=org_ctx.org_id,
             reviewer_user_id=str(current_user["id"]),
             action="REJECT",
-            reject_reason=req.reject_reason
+            reject_reason=reason
         )
-        return updated
+        return _format_claim(updated)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -268,6 +316,6 @@ def reimburse_claim(
             org_id=org_ctx.org_id,
             operator_user_id=str(current_user["id"])
         )
-        return updated
+        return _format_claim(updated)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

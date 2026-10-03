@@ -305,14 +305,125 @@ def get_finance_summary(db: Session, org_id: str) -> dict:
         {"oid": org_id}
     ).mappings().first()
 
+    # 5. Income channels
+    income_by_channel = db.execute(
+        text("""
+            SELECT 
+                coalesce(SUM(CASE WHEN bc.name ILIKE '%Member%' OR le.source_type::text = 'MEMBERSHIP' THEN le.amount ELSE 0 END), 0) as memberships,
+                coalesce(SUM(CASE WHEN bc.name ILIKE '%Ticket%' OR le.source_type::text = 'TICKET' THEN le.amount ELSE 0 END), 0) as tickets,
+                coalesce(SUM(CASE WHEN bc.name ILIKE '%Merch%' OR bc.name ILIKE '%Store%' OR le.source_type::text = 'STORE' THEN le.amount ELSE 0 END), 0) as merchandise,
+                coalesce(SUM(CASE WHEN bc.name ILIKE '%Fundrais%' OR bc.name ILIKE '%Charity%' OR le.source_type::text = 'FUNDRAISER' THEN le.amount ELSE 0 END), 0) as fundraisers,
+                coalesce(SUM(CASE WHEN 
+                    (bc.name NOT ILIKE '%Member%' AND bc.name NOT ILIKE '%Ticket%' AND bc.name NOT ILIKE '%Merch%' AND bc.name NOT ILIKE '%Store%' AND bc.name NOT ILIKE '%Fundrais%' AND bc.name NOT ILIKE '%Charity%')
+                    OR bc.id IS NULL
+                THEN le.amount ELSE 0 END), 0) as other
+            FROM ledger_entries le
+            LEFT JOIN budget_categories bc ON bc.id = le.category_id
+            WHERE le.organization_id = :oid AND le.direction = 'IN'
+        """),
+        {"oid": org_id}
+    ).mappings().first()
+
+    # 6. Expenses breakdown
+    exp_breakdown = db.execute(
+        text("""
+            SELECT 
+                coalesce(SUM(CASE WHEN source_type = 'EXPENSE_CLAIM' THEN amount ELSE 0 END), 0) as reimbursements,
+                coalesce(SUM(CASE WHEN source_type != 'EXPENSE_CLAIM' AND direction = 'OUT' THEN amount ELSE 0 END), 0) as other_expenses
+            FROM ledger_entries
+            WHERE organization_id = :oid AND direction = 'OUT'
+        """),
+        {"oid": org_id}
+    ).mappings().first()
+
+    # 7. Approved claims pending payment
+    approved_pending = db.execute(
+        text("""
+            SELECT coalesce(SUM(amount), 0) as total
+            FROM expense_claims
+            WHERE organization_id = :oid AND status = 'APPROVED'
+        """),
+        {"oid": org_id}
+    ).scalar() or 0.0
+
+    # 8. Recent ledger entries
+    recent_ledger = db.execute(
+        text("""
+            SELECT le.id, le.created_at, le.reference_number, le.direction, le.amount, le.description, le.source_type, bc.name as category_name
+            FROM ledger_entries le
+            LEFT JOIN budget_categories bc ON bc.id = le.category_id
+            WHERE le.organization_id = :oid
+            ORDER BY le.created_at DESC
+            LIMIT 10
+        """),
+        {"oid": org_id}
+    ).mappings().all()
+
     return {
         "total_revenue": total_in,
         "total_expenses": total_out,
         "net_balance": balance,
+        "closingCash": balance,
+        "closing_cash": balance,
+        "openingBalance": 0.0,
+        "moneyReceived": total_in,
+        "refunds": 0.0,
+        "reimbursements": float(exp_breakdown["reimbursements"]),
+        "otherExpenses": float(exp_breakdown["other_expenses"]),
+        "approvedClaimsAwaitingPayment": float(approved_pending),
+        "incomeBreakdown": {
+            "memberships": float(income_by_channel["memberships"]),
+            "tickets": float(income_by_channel["tickets"]),
+            "merchandise": float(income_by_channel["merchandise"]),
+            "fundraisers": float(income_by_channel["fundraisers"]),
+            "other": float(income_by_channel["other"])
+        },
         "by_category": [dict(c) for c in categories_breakdown],
         "planned_vs_actual": [dict(p) for p in planned_actual],
         "pending_claims_count": int(pending_reimbursements["count"]),
-        "pending_claims_amount": float(pending_reimbursements["total_amount"])
+        "pending_claims_amount": float(pending_reimbursements["total_amount"]),
+        "ledger": [dict(r) for r in recent_ledger]
+    }
+
+def get_finance_reports(db: Session, org_id: str, timeframe: Optional[str] = None) -> dict:
+    summary = get_finance_summary(db, org_id)
+    
+    # Monthly breakdown from ledger entries
+    months_data = db.execute(
+        text("""
+            SELECT 
+                to_char(created_at, 'Month YYYY') as month,
+                date_trunc('month', created_at) as month_date,
+                coalesce(SUM(CASE WHEN direction = 'IN' THEN amount ELSE 0 END), 0) as income,
+                coalesce(SUM(CASE WHEN direction = 'OUT' THEN amount ELSE 0 END), 0) as expenses
+            FROM ledger_entries
+            WHERE organization_id = :oid
+            GROUP BY date_trunc('month', created_at), to_char(created_at, 'Month YYYY')
+            ORDER BY month_date ASC
+        """),
+        {"oid": org_id}
+    ).mappings().all()
+
+    breakdown = []
+    for m in months_data:
+        inc = float(m["income"])
+        exp = float(m["expenses"])
+        breakdown.append({
+            "month": m["month"].strip(),
+            "income": inc,
+            "expenses": exp,
+            "net": inc - exp
+        })
+
+    if not breakdown:
+        breakdown = [
+            {"month": "October 2026", "income": summary["total_revenue"], "expenses": summary["total_expenses"], "net": summary["net_balance"]}
+        ]
+
+    return {
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "summary": summary,
+        "breakdownByMonth": breakdown
     }
 
 def export_finance_csv(db: Session, org_id: str) -> str:

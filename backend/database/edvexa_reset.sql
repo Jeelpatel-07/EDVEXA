@@ -1,3 +1,8 @@
+-- DESTRUCTIVE: all EDVEXA records will be removed. Make pg_dump backup first.
+-- Explicit opt-in required in the SAME session: SET app.confirm_reset='DELETE_EDVEXA_DATA';
+BEGIN;
+DO $$ BEGIN IF current_setting('app.confirm_reset',true) IS DISTINCT FROM 'DELETE_EDVEXA_DATA' THEN
+RAISE EXCEPTION 'Reset refused: back up first and explicitly set app.confirm_reset'; END IF; END $$;
 -- ========================================================
 -- EDVEXA DATABASE RESET SCRIPT
 -- Drops all tables, views, functions, triggers, and types
@@ -98,3 +103,6 @@ DROP TYPE IF EXISTS budget_category_type_enum CASCADE;
 DROP TYPE IF EXISTS expense_claim_status_enum CASCADE;
 DROP TYPE IF EXISTS ledger_direction_enum CASCADE;
 DROP TYPE IF EXISTS ledger_source_type_enum CASCADE;
+
+DROP FUNCTION IF EXISTS fn_keep_org_admin() CASCADE;
+COMMIT;

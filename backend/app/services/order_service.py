@@ -1,3 +1,4 @@
+from decimal import Decimal
 import uuid
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -25,10 +26,10 @@ def create_order(db: Session, user_id: str, org_id: str, order_type: str, items:
     order_number = f"{prefix}-ORD-{current_year}-{seq_num:05d}"
 
     # 2. Process items, calculate server-side prices, and reserve stock FOR UPDATE
-    total_amount = 0.0
+    total_amount = Decimal("0.00")
     processed_items = []
 
-    for itm in items:
+    for itm in sorted(items, key=lambda i: str(i.get("ticket_type_id") or i.get("variant_id") or i.get("plan_id"))):
         qty = itm.get("quantity", 1)
         if qty <= 0:
             raise ValueError("Quantity must be greater than zero.")
@@ -192,6 +193,8 @@ def process_order_payment(db: Session, order_id: str, org_id: str, payment_metho
         {"ikey": idem_key, "oid": org_id}
     ).mappings().first()
 
+    if existing_payment and str(existing_payment["order_id"]) != str(order_id):
+        raise ValueError("Idempotency key already belongs to another order.")
     if existing_payment and existing_payment["status"] == "SUCCESS":
         order = db.execute(text("SELECT * FROM orders WHERE id = :id"), {"id": order_id}).mappings().first()
         return dict(order)
@@ -210,6 +213,9 @@ def process_order_payment(db: Session, order_id: str, org_id: str, payment_metho
 
     if order["status"] in ("CANCELLED", "REFUNDED"):
         raise ValueError("Cannot pay for a cancelled or refunded order.")
+
+    if order["expires_at"] and order["expires_at"] <= now:
+        raise ValueError("Reservation expired; create a new order.")
 
     # 1. Create Payment row
     payment_id = str(uuid.uuid4())

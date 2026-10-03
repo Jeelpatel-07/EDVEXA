@@ -8,7 +8,7 @@ import OrgSuspended from "./OrgSuspended";
  * Verifies authentication, tenant context, and organization status (Section 38).
  */
 export default function OrganizationRoute({ children }) {
-  const { isAuthenticated, isLoading, organization, isPlatformAdmin } = useAuth();
+  const { isAuthenticated, isLoading, organization } = useAuth();
   const location = useLocation();
 
   if (isLoading) {
@@ -27,6 +27,8 @@ export default function OrganizationRoute({ children }) {
   if (organization && organization.status === "SUSPENDED") {
     return <OrgSuspended />;
   }
+
+  if (!organization) return <Navigate to="/organizations" replace />;
 
   return children;
 }

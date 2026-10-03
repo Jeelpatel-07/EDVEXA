@@ -1,94 +1,137 @@
+import logging
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request, status
+from time import monotonic
+from uuid import uuid4
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-from app.config import settings
-from app.jobs.scheduler import start_scheduler, shutdown_scheduler
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-# Routers
-from app.routers import (
-    auth, platform, org_admin, membership,
-    events, tickets, orders, store, announcements,
-    fundraisers, finance, public
-)
+from app.config import settings
+from app.db import engine
+
+log=logging.getLogger("edvexa")
+SCHEMA_VERSION="2026.10.recovery.1"
+
+
+def database_diagnostic():
+    try:
+        with engine.connect() as db:
+            db.execute(text("SELECT 1"))
+            info=dict(db.execute(text("SELECT current_database() AS database, version() AS server_version")).mappings().one())
+            info["tables"]=db.execute(text("SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'")).scalar()
+            info["roles"]=db.execute(text("SELECT count(*) FROM roles")).scalar()
+            info["users"]=db.execute(text("SELECT count(*) FROM users")).scalar()
+            version=db.execute(text("SELECT value FROM platform_settings WHERE key='schema_version'")).scalar()
+            guard=db.execute(text("SELECT count(*) FROM pg_trigger WHERE tgname='trg_guard_platform_admin' AND NOT tgisinternal AND tgenabled='O'")).scalar()
+            if info["roles"]!=6 or info["tables"]!=42 or version!=SCHEMA_VERSION or guard!=1:
+                return False,{"detail":"Schema mismatch. Back up the database; run backend/database/edvexa_complete.sql on a separate empty database.","code":"SCHEMA_MISMATCH",**info}
+            return True,{"status":"ready","schema_version":version,**info}
+    except SQLAlchemyError as exc:
+        code=getattr(getattr(exc,"orig",None),"sqlstate",None)
+        message=str(getattr(exc,"orig",exc)).lower()
+        if code=="28P01" or "password authentication failed" in message:
+            cause="PostgreSQL rejected the credentials; check DATABASE_URL username/password."
+        elif code=="3D000" or "does not exist" in message and "database" in message:
+            cause="Database does not exist; create the database named in DATABASE_URL."
+        elif code in ("42P01","42703"):
+            cause="Required schema is missing. Run backend/database/edvexa_complete.sql on an empty database."
+        elif "ssl" in message or "pg_hba" in message:
+            cause="Check SSL requirements (sslmode=require) and the server pg_hba.conf access rule."
+        else:
+            cause="Cannot connect to PostgreSQL. Check host/port, running service, LAN firewall and listen_addresses."
+        return False,{"detail":cause,"code":"DATABASE_UNAVAILABLE"}
+
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup: Start APScheduler background jobs
-    start_scheduler()
+async def lifespan(application):
+    ready,details=database_diagnostic()
+    application.state.database_ready=ready
+    if not ready:
+        log.error("EDVEXA startup check: %s",details["detail"])
+    if ready and settings.JOBS_ENABLED:
+        from app.jobs.scheduler import start_scheduler
+        start_scheduler()
     yield
-    # Shutdown
-    shutdown_scheduler()
+    if ready and settings.JOBS_ENABLED:
+        from app.jobs.scheduler import shutdown_scheduler
+        shutdown_scheduler()
+    engine.dispose()
 
-app = FastAPI(
-    title="EDVEXA API",
-    description="Multi-tenant SaaS backend for collegiate student organizations, events, memberships, and treasury management.",
-    version="1.0.0",
-    lifespan=lifespan
-)
 
-# CORS Middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+app=FastAPI(title="EDVEXA",version="1.0.0",lifespan=lifespan)
+app.add_middleware(CORSMiddleware,allow_origins=settings.CORS_ORIGINS,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+    allow_headers=["Authorization","Content-Type","X-CSRF-Token","Idempotency-Key"],
+    expose_headers=["X-Request-ID","Retry-After"])
+attempts=defaultdict(deque)
 
-# Static files for receipts and product uploads
-app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
-# Standardized Error Handlers
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    code = "ERROR"
-    if exc.status_code == 401:
-        code = "UNAUTHORIZED"
-    elif exc.status_code == 403:
-        code = "FORBIDDEN"
-    elif exc.status_code == 404:
-        code = "NOT_FOUND"
-    elif exc.status_code == 422:
-        code = "UNPROCESSABLE_ENTITY"
-    elif exc.status_code == 429:
-        code = "RATE_LIMITED"
+@app.middleware("http")
+async def headers_and_limit(request:Request,call_next):
+    request.state.request_id=str(uuid4())
+    if request.method=="POST" and request.url.path.startswith("/api/v1/auth/"):
+        key=(request.client.host if request.client else "unknown",request.url.path)
+        now=monotonic()
+        queue=attempts[key]
+        while queue and queue[0]<now-60:
+            queue.popleft()
+        if len(queue)>=30:
+            return JSONResponse({"detail":"Too many requests","code":"RATE_LIMITED"},429,headers={"Retry-After":"60"})
+        queue.append(now)
+    response=await call_next(request)
+    response.headers.update({"X-Request-ID":request.state.request_id,"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"})
+    return response
 
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail, "code": code}
-    )
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error(request,exc):
+    codes={401:"UNAUTHENTICATED",403:"FORBIDDEN",404:"NOT_FOUND",409:"CONFLICT",422:"VALIDATION_ERROR",429:"RATE_LIMITED"}
+    return JSONResponse({"detail":exc.detail,"code":codes.get(exc.status_code,"REQUEST_FAILED")},exc.status_code,headers=exc.headers)
+
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    # Extract error message cleanly
-    errors = exc.errors()
-    msg = errors[0].get("msg") if errors else "Validation failed"
-    loc = " -> ".join([str(l) for l in errors[0].get("loc", [])]) if errors else ""
-    detail = f"{loc}: {msg}" if loc else msg
+async def validation_error(request,exc):
+    fields=[{"field":".".join(map(str,e["loc"])),"type":e["type"]} for e in exc.errors()]
+    return JSONResponse({"detail":"Check the submitted fields","code":"VALIDATION_ERROR","fields":fields},422)
 
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": detail, "code": "VALIDATION_ERROR"}
-    )
 
-# Include API v1 Routers
-api_v1_prefix = "/api/v1"
-app.include_router(auth.router, prefix=api_v1_prefix)
-app.include_router(platform.router, prefix=api_v1_prefix)
-app.include_router(org_admin.router, prefix=api_v1_prefix)
-app.include_router(membership.router, prefix=api_v1_prefix)
-app.include_router(events.router, prefix=api_v1_prefix)
-app.include_router(tickets.router, prefix=api_v1_prefix)
-app.include_router(orders.router, prefix=api_v1_prefix)
-app.include_router(store.router, prefix=api_v1_prefix)
-app.include_router(announcements.router, prefix=api_v1_prefix)
-app.include_router(fundraisers.router, prefix=api_v1_prefix)
-app.include_router(finance.router, prefix=api_v1_prefix)
-app.include_router(public.router, prefix=api_v1_prefix)
+@app.exception_handler(IntegrityError)
+async def constraint_error(request,exc):
+    return JSONResponse({"detail":"This operation conflicts with an existing record or organization rule","code":"CONFLICT"},409)
+
+
+@app.exception_handler(SQLAlchemyError)
+async def db_error(request,exc):
+    log.error("Database operation failed type=%s request=%s",type(exc).__name__,request.state.request_id)
+    return JSONResponse({"detail":"Database operation unavailable; check /health/db","code":"DATABASE_ERROR"},503)
+
+
+@app.exception_handler(Exception)
+async def internal_error(request,exc):
+    log.error("Unhandled error type=%s request=%s",type(exc).__name__,request.state.request_id)
+    return JSONResponse({"detail":"Unexpected server error","code":"INTERNAL_ERROR"},500)
+
 
 @app.get("/health")
-def health_check():
-    return {"status": "healthy", "service": "EDVEXA API"}
+def health():
+    return {"status":"alive","service":"EDVEXA"}
+
+
+@app.get("/health/db")
+def health_db():
+    ready,result=database_diagnostic()
+    return JSONResponse(jsonable_encoder(result),200 if ready else 503)
+
+
+from app.routers import workspace,auth,platform,org_admin,membership,events,tickets,orders,store,announcements,fundraisers,finance,public
+for module in (workspace,auth,platform,org_admin,membership,events,tickets,orders,store,announcements,fundraisers,finance,public):
+    app.include_router(module.router,prefix="/api/v1")

@@ -1,16 +1,43 @@
-# React + Vite
+# EDVEXA frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+This is the React frontend from Jeelpatel-07/EDVEXA, connected to the tested local FastAPI
+backend in D:/EDVEXA/backend. The first module is authentication and organization access.
 
-Currently, two official plugins are available:
+## Run
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+From D:/EDVEXA/frontend:
+```powershell
+npm ci
+npm run dev -- --host localhost --port 5173 --strictPort
+```
+Default API: http://localhost:8000/api. Set VITE_API_URL in a local .env if necessary.
+The backend must allow the frontend's exact origin. Use localhost for both browser URLs.
 
-## React Compiler
+## First-module connection
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+src/api/axios.js owns in-memory access tokens, error formatting, CSRF bootstrap and
+serialized cookie refresh/logout. src/api/authApi.js implements account requests.
+AuthContext uses GET /api/auth/context; server roles/permissions govern route visibility.
+Organization selection is stored on the backend session; there is no demo organization ID.
 
-## Expanding the Oxlint configuration
+Registration posts full_name, email, password and optional join_code/student_id.
+Passwords are 15–128 characters. Student IDs are organization-specific.
+Verification, reset and invitation pages read real #token= links and require explicit submission.
+A failed verification never shows success. Existing invitees sign in before accepting.
+The organization picker supports selection and joining; users without a tenant see that page.
+Users & Roles can create/activate academic terms and update staff roles atomically.
+Platform pages use the new tenant administration endpoints.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+## Scope
+
+Membership, tickets, store, finance, announcements and other business pages remain frontend
+work for subsequent backend modules. First-module responses do not fabricate paid membership.
+Invitations produce a shareable link; they are not automatically emailed.
+Account email delivery needs PostgreSQL, SMTP and the backend's email worker.
+See D:/EDVEXA/backend/README.md for migration, administrator bootstrap and team setup.
+
+## Checks
+
+npm run build succeeds. npm run lint exits successfully with inherited warnings.
+Browser integration was checked with disposable SQLite data. No project PostgreSQL
+database was migrated and no GitHub changes were pushed.

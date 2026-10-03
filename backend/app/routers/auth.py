@@ -1,887 +1,338 @@
-import secrets
-import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from app.db import get_db
+
 from app.config import settings
+from app.db import get_db
 from app.deps import get_current_user
-from app.schemas.auth import (
-    RegisterRequest, LoginRequest, SelectOrgRequest, ForgotPasswordRequest,
-    ResetPasswordRequest, ChangePasswordRequest, AcceptInviteRequest,
-    TokenResponse, AuthSessionResponse
-)
-from app.services.auth_service import (
-    hash_password, verify_password, hash_token, create_access_token,
-    create_refresh_token, rotate_refresh_token, check_login_lockout,
-    record_login_attempt, send_email_notification
-)
+from app.schemas.auth import (RegisterRequest, LoginRequest, SelectOrgRequest, JoinOrgRequest,
+    ForgotPasswordRequest, TokenRequest, ResetPasswordRequest, ChangePasswordRequest,
+    AcceptInviteRequest, ProfileUpdate)
+from app.services import auth_service as s
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+router=APIRouter(prefix="/auth",tags=["Authentication"])
+COOKIE="edvexa_refresh"
+COOKIE_PATH="/api/v1/auth"
 
-@router.post("/register", status_code=status.HTTP_201_CREATED)
-def register(req: RegisterRequest, request: Request, db: Session = Depends(get_db)):
-    # Check email duplicate
-    existing = db.execute(
-        text("SELECT id FROM users WHERE email = :email"),
-        {"email": req.email.strip().lower()}
-    ).first()
 
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="An account with this email address already exists."
-        )
+def clear_cookie(response):
+    response.delete_cookie(COOKIE,path=COOKIE_PATH,httponly=True,secure=settings.COOKIE_SECURE,samesite="lax")
 
-    # Hash password
-    pw_hash = hash_password(req.password)
-    user_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
 
-    # Resolve join code if provided
-    org_id = None
-    if req.join_code:
-        org_row = db.execute(
-            text("SELECT id, status FROM organizations WHERE join_code = :jcode"),
-            {"jcode": req.join_code.strip()}
-        ).mappings().first()
-        if not org_row:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid organization join code.")
-        if org_row["status"] != "ACTIVE":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Organization is currently inactive.")
-        org_id = str(org_row["id"])
-
-    # Create user as PENDING_EMAIL_VERIFICATION
-    db.execute(
-        text("""
-            INSERT INTO users (id, email, password_hash, full_name, status, created_via, last_org_id, created_at)
-            VALUES (:id, :email, :pw, :name, 'PENDING_EMAIL_VERIFICATION', 'SELF_SIGNUP', :last_org, :now)
-        """),
-        {
-            "id": user_id,
-            "email": req.email.strip().lower(),
-            "pw": pw_hash,
-            "name": req.name.strip(),
-            "last_org": org_id,
-            "now": now
-        }
-    )
-
-    # Attach to organization if join_code provided
-    if org_id:
-        # Check student ID uniqueness per org if provided
-        if req.student_id:
-            stu_exists = db.execute(
-                text("SELECT id FROM organization_users WHERE organization_id = :oid AND student_id = :sid"),
-                {"oid": org_id, "sid": req.student_id.strip()}
-            ).first()
-            if stu_exists:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This Student ID is already registered in this organization.")
-
-        db.execute(
-            text("""
-                INSERT INTO organization_users (organization_id, user_id, status, student_id, joined_via, created_at)
-                VALUES (:oid, :uid, 'ACTIVE', :sid, 'JOIN_CODE', :now)
-            """),
-            {
-                "oid": org_id,
-                "uid": user_id,
-                "sid": req.student_id.strip() if req.student_id else None,
-                "now": now
-            }
-        )
-
-    # Create email verification token
-    raw_token = secrets.token_urlsafe(32)
-    t_hash = hash_token(raw_token)
-    expires = now + timedelta(hours=24)
-
-    db.execute(
-        text("""
-            INSERT INTO auth_tokens (user_id, purpose, token_hash, expires_at, created_at)
-            VALUES (:uid, 'EMAIL_VERIFY', :thash, :exp, :now)
-        """),
-        {"uid": user_id, "thash": t_hash, "exp": expires, "now": now}
-    )
+def tokens(db,user,org,request,response,family=None,expiry=None):
+    context=s.session_context(db,user,org)
+    raw,family,expiry=s.new_refresh(db,user,org,family,expiry,request)
+    access=s.create_access_token(user["id"],org,context["roles"],family)
     db.commit()
+    response.set_cookie(COOKIE,raw,httponly=True,secure=settings.COOKIE_SECURE,samesite="lax",
+        path=COOKIE_PATH,max_age=max(1,int((expiry-datetime.now(UTC)).total_seconds())))
+    return {**context,"access_token":access,"token_type":"bearer","csrf_token":s.csrf_token(family),"expires_in":settings.ACCESS_TOKEN_MINUTES*60}
 
-    # Send verification link
-    verify_link = f"{settings.APP_BASE_URL}/verify-email?token={raw_token}"
-    send_email_notification(
-        recipient=req.email,
-        subject="Verify your EDVEXA Account",
-        message="Welcome to EDVEXA! Please click the verification link below to verify your student email address.",
-        link=verify_link
-    )
 
+def send_link(user,raw,purpose):
+    path="reset-password" if purpose=="PASSWORD_RESET" else "verify-email"
+    s.send_email_notification(user["email"],"EDVEXA account action","Use this single-use link:",f"{settings.APP_BASE_URL.rstrip('/')}/{path}#token={raw}")
+
+
+@router.post("/register",status_code=201)
+def register(data:RegisterRequest,db:Session=Depends(get_db)):
+    req_role = (data.role or "GUEST").strip().upper()
+    if req_role in ("PLATFORM_ADMIN", "ORG_ADMIN"):
+        s.fail("Platform Administrator and Organization Administrator accounts cannot be self-registered.", 422)
+
+    ALLOWED_ROLES = {"TREASURER", "EVENT_MANAGER", "GATE_STAFF", "VOLUNTEER", "MEMBER", "GUEST", "STUDENT"}
+    if req_role not in ALLOWED_ROLES:
+        s.fail(f"Invalid registration role '{data.role}'.", 422)
+
+    org = None
+    if data.join_code:
+        org = db.execute(text("SELECT * FROM organizations WHERE join_code=:code AND status='ACTIVE' FOR UPDATE"), dict(code=data.join_code.strip())).mappings().first()
+        if not org:
+            s.fail("Invalid organization code", 400)
+    elif req_role in ("TREASURER", "EVENT_MANAGER", "GATE_STAFF", "VOLUNTEER", "MEMBER"):
+        # Default to the primary EDVEXA Student Association organization if no code provided
+        org = db.execute(text("SELECT * FROM organizations WHERE slug='edvexa' AND status='ACTIVE'")).mappings().first()
+
+    if data.student_id and not org:
+        s.fail("An organization code is required with a student ID", 400)
+    if org and data.student_id and db.execute(text("SELECT 1 FROM organization_users WHERE organization_id=:org AND student_id=:student"), dict(org=org["id"], student=data.student_id.strip())).scalar():
+        s.fail("Student ID already belongs to an account in this organization", 409)
+
+    email = str(data.email).lower()
+    pw = s.hash_password(data.password)
+
+    user = db.execute(text("""
+        INSERT INTO users(email, password_hash, full_name, status, email_verified_at, created_via)
+        VALUES(:email, :pw, :name, 'ACTIVE', now(), 'SELF_SIGNUP')
+        ON CONFLICT(email) DO NOTHING RETURNING *
+    """), dict(email=email, pw=pw, name=data.full_name.strip())).mappings().first()
+
+    if not user:
+        s.fail("An account with this email address already exists.", 409)
+
+    if org:
+        db.execute(text("""
+            INSERT INTO organization_users(organization_id, user_id, student_id, joined_via, status)
+            VALUES(:org, :uid, :student, 'JOIN_CODE', 'ACTIVE')
+            ON CONFLICT DO NOTHING
+        """), dict(org=org["id"], uid=user["id"], student=data.student_id.strip() if data.student_id else None))
+
+        # Assign requested staff role
+        if req_role in ("TREASURER", "EVENT_MANAGER", "GATE_STAFF", "VOLUNTEER"):
+            role_id = db.execute(text("SELECT id FROM roles WHERE code=:code"), dict(code=req_role)).scalar()
+            term_id = db.execute(text("SELECT id FROM academic_terms WHERE organization_id=:oid AND is_current=true"), dict(oid=org["id"])).scalar()
+            if role_id and term_id:
+                db.execute(text("""
+                    INSERT INTO user_roles(user_id, role_id, organization_id, term_id, valid_from, created_at)
+                    VALUES(:uid, :rid, :oid, :tid, now(), now())
+                    ON CONFLICT DO NOTHING
+                """), dict(uid=user["id"], rid=role_id, oid=org["id"], tid=term_id))
+
+        # Provision active membership if registered as Member
+        elif req_role == "MEMBER":
+            plan = db.execute(text("SELECT id FROM membership_plans WHERE organization_id=:oid AND is_active=true LIMIT 1"), dict(oid=org["id"])).mappings().first()
+            if plan:
+                seq_val = db.execute(text("SELECT fn_next_sequence(:oid, 'MEMBER', 2026)"), dict(oid=org["id"])).scalar() or 1
+                db.execute(text("""
+                    INSERT INTO memberships (organization_id, user_id, plan_id, member_number, status, payment_status, start_date, end_date, qr_token, created_at)
+                    VALUES (:oid, :uid, :pid, :mnum, 'ACTIVE', 'PAID', CURRENT_DATE, CURRENT_DATE + interval '365 days', gen_random_uuid(), now())
+                    ON CONFLICT DO NOTHING
+                """), dict(oid=org["id"], uid=user["id"], pid=plan["id"], mnum=f"EDV-MEM-2026-{seq_val:05d}"))
+
+    db.commit()
     return {
-        "message": "Account created successfully. Verification link has been dispatched to your email.",
-        "email": req.email
+        "message": f"Successfully registered as {req_role}. You can sign in immediately.",
+        "email": email,
+        "role": req_role
     }
+
+
+@router.post("/verify-email")
+def verify_email(data:TokenRequest,db:Session=Depends(get_db)):
+    user,tok=s.lock_auth_token(db,data.token,"EMAIL_VERIFY")
+    if user["status"]!="PENDING_EMAIL_VERIFICATION":
+        s.fail("This account cannot be verified with this link",400)
+    db.execute(text("UPDATE users SET status='ACTIVE',email_verified_at=now() WHERE id=:uid"),dict(uid=user["id"]))
+    db.execute(text("UPDATE auth_tokens SET used_at=now() WHERE user_id=:uid AND purpose='EMAIL_VERIFY'"),dict(uid=user["id"]))
+    db.commit()
+    return {"message":"Email verified. Sign in to continue."}
+
 
 @router.get("/verify-email")
-def verify_email(token: str, db: Session = Depends(get_db)):
-    t_hash = hash_token(token.strip())
-    now = datetime.now(timezone.utc)
+def verify_email_get(token:str,db:Session=Depends(get_db)):
+    return verify_email(TokenRequest(token=token),db)
 
-    tok = db.execute(
-        text("""
-            SELECT * FROM auth_tokens 
-            WHERE token_hash = :thash AND purpose = 'EMAIL_VERIFY' AND used_at IS NULL
-        """),
-        {"thash": t_hash}
-    ).mappings().first()
-
-    if not tok:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or already used verification token.")
-
-    if tok["expires_at"] < now:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Verification link has expired. Please request a new one.")
-
-    # Mark token used
-    db.execute(
-        text("UPDATE auth_tokens SET used_at = :now WHERE id = :id"),
-        {"now": now, "id": tok["id"]}
-    )
-
-    # Activate user
-    db.execute(
-        text("UPDATE users SET status = 'ACTIVE', email_verified_at = :now WHERE id = :uid"),
-        {"now": now, "uid": tok["user_id"]}
-    )
-    db.commit()
-
-    return {"message": "Email address verified successfully. You may now log in to EDVEXA."}
-
-@router.post("/resend-verification")
-def resend_verification(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    user = db.execute(
-        text("SELECT * FROM users WHERE email = :email"),
-        {"email": req.email.strip().lower()}
-    ).mappings().first()
-
-    if user and user["status"] == "PENDING_EMAIL_VERIFICATION":
-        now = datetime.now(timezone.utc)
-        raw_token = secrets.token_urlsafe(32)
-        t_hash = hash_token(raw_token)
-        expires = now + timedelta(hours=24)
-
-        db.execute(
-            text("""
-                INSERT INTO auth_tokens (user_id, purpose, token_hash, expires_at, created_at)
-                VALUES (:uid, 'EMAIL_VERIFY', :thash, :exp, :now)
-            """),
-            {"uid": user["id"], "thash": t_hash, "exp": expires, "now": now}
-        )
-        db.commit()
-
-        verify_link = f"{settings.APP_BASE_URL}/verify-email?token={raw_token}"
-        send_email_notification(
-            recipient=user["email"],
-            subject="Verify your EDVEXA Account",
-            message="Please verify your email address to access your EDVEXA account.",
-            link=verify_link
-        )
-
-    return {"message": "If an unverified account exists for that email, a new verification link has been sent."}
-
-@router.post("/login")
-def login(req: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    user_agent = request.headers.get("user-agent", "Unknown")
-
-    # 1. Lockout check
-    is_locked, lock_msg = check_login_lockout(db, req.email.strip().lower(), client_ip)
-    if is_locked:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=lock_msg)
-
-    # 2. Check user exists
-    user = db.execute(
-        text("SELECT * FROM users WHERE email = :email"),
-        {"email": req.email.strip().lower()}
-    ).mappings().first()
-
-    if not user:
-        record_login_attempt(db, req.email.strip().lower(), client_ip, user_agent, False, "user_not_found")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
-
-    # 3. Check password
-    if not verify_password(req.password, user["password_hash"]):
-        record_login_attempt(db, req.email.strip().lower(), client_ip, user_agent, False, "invalid_password")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
-
-    # 4. Check user status & verification
-    if user["status"] == "PENDING_EMAIL_VERIFICATION":
-        record_login_attempt(db, req.email.strip().lower(), client_ip, user_agent, False, "unverified_email")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Please verify your email address before signing in.")
-
-    if user["status"] != "ACTIVE":
-        record_login_attempt(db, req.email.strip().lower(), client_ip, user_agent, False, f"status_{user['status']}")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Your account is {user['status'].lower().replace('_', ' ')}.")
-
-    # Successful credentials check
-    record_login_attempt(db, req.email.strip().lower(), client_ip, user_agent, True)
-
-    # 5. Check Platform Admin Role
-    is_platform_admin = db.execute(
-        text("""
-            SELECT 1 FROM user_roles ur
-            JOIN roles r ON r.id = ur.role_id
-            WHERE ur.user_id = :uid AND ur.organization_id IS NULL AND ur.revoked_at IS NULL AND r.code = 'PLATFORM_ADMIN'
-        """),
-        {"uid": user["id"]}
-    ).scalar()
-
-    if is_platform_admin:
-        # Platform Admin: no organization
-        access_tok = create_access_token(user_id=str(user["id"]), org_id=None, roles=["PLATFORM_ADMIN"])
-        refresh_tok, _ = create_refresh_token(db, user_id=str(user["id"]), org_id=None, user_agent=user_agent, ip=client_ip)
-
-        response.set_cookie(
-            key="edvexa_refresh_token",
-            value=refresh_tok,
-            httponly=True,
-            secure=settings.COOKIE_SECURE,
-            samesite="lax",
-            max_age=settings.REFRESH_TOKEN_DAYS * 86400
-        )
-
-        perms = db.execute(text("SELECT permission_code FROM fn_user_permissions(:uid, NULL)"), {"uid": user["id"]}).scalars().all()
-
-        return {
-            "access_token": access_tok,
-            "token_type": "bearer",
-            "user": {
-                "id": str(user["id"]),
-                "email": user["email"],
-                "full_name": user["full_name"],
-                "status": user["status"]
-            },
-            "organization": None,
-            "roles": ["PLATFORM_ADMIN"],
-            "permissions": list(perms),
-            "is_member": False,
-            "membership": None,
-            "persona_label": "PLATFORM_ADMIN"
-        }
-
-    # 6. Fetch Organizations user belongs to
-    orgs = db.execute(
-        text("""
-            SELECT o.id, o.name, o.slug, o.status, ou.status as membership_status, ou.student_id
-            FROM organization_users ou
-            JOIN organizations o ON o.id = ou.organization_id
-            WHERE ou.user_id = :uid AND ou.status = 'ACTIVE' AND o.status = 'ACTIVE'
-        """),
-        {"uid": user["id"]}
-    ).mappings().all()
-
-    if len(orgs) == 0:
-        # User has no active organizations
-        access_tok = create_access_token(user_id=str(user["id"]), org_id=None, roles=[])
-        refresh_tok, _ = create_refresh_token(db, user_id=str(user["id"]), org_id=None, user_agent=user_agent, ip=client_ip)
-        return {
-            "access_token": access_tok,
-            "token_type": "bearer",
-            "user": {
-                "id": str(user["id"]),
-                "email": user["email"],
-                "full_name": user["full_name"],
-                "status": user["status"]
-            },
-            "organization": None,
-            "roles": [],
-            "permissions": [],
-            "is_member": False,
-            "membership": None,
-            "persona_label": "GUEST"
-        }
-
-    if len(orgs) > 1:
-        # Prompt selection
-        return {
-            "requires_org_selection": True,
-            "organizations": [
-                {"id": str(o["id"]), "name": o["name"], "slug": o["slug"]} for o in orgs
-            ]
-        }
-
-    # Exactly 1 active organization: auto-select
-    selected_org = orgs[0]
-    org_id = str(selected_org["id"])
-
-    # Load current academic term for org
-    term_row = db.execute(
-        text("SELECT id FROM academic_terms WHERE organization_id = :oid AND is_current = true"),
-        {"oid": org_id}
-    ).mappings().first()
-    term_id = str(term_row["id"]) if term_row else None
-
-    # Load roles
-    roles = db.execute(
-        text("""
-            SELECT DISTINCT r.code
-            FROM user_roles ur
-            JOIN roles r ON r.id = ur.role_id
-            WHERE ur.user_id = :uid AND ur.organization_id = :oid AND ur.revoked_at IS NULL
-              AND (ur.term_id IS NULL OR CAST(:tid AS UUID) IS NULL OR ur.term_id = CAST(:tid AS UUID))
-        """),
-        {"uid": user["id"], "oid": org_id, "tid": term_id}
-    ).scalars().all()
-
-    # Load permissions
-    perms = db.execute(
-        text("SELECT permission_code FROM fn_user_permissions(:uid, :oid)"),
-        {"uid": user["id"], "oid": org_id}
-    ).scalars().all()
-
-    # Derived is_member
-    is_member = db.execute(
-        text("SELECT fn_is_member(:uid, :oid)"),
-        {"uid": user["id"], "oid": org_id}
-    ).scalar() or False
-
-    membership_row = db.execute(
-        text("""
-            SELECT m.*, mp.name as plan_name 
-            FROM memberships m
-            JOIN membership_plans mp ON mp.id = m.plan_id
-            WHERE m.user_id = :uid AND m.organization_id = :oid AND m.status = 'ACTIVE'
-            ORDER BY m.end_date DESC LIMIT 1
-        """),
-        {"uid": user["id"], "oid": org_id}
-    ).mappings().first()
-
-    persona_label = "MEMBER" if is_member else ("STAFF" if len(roles) > 0 else "GUEST")
-
-    access_tok = create_access_token(user_id=str(user["id"]), org_id=org_id, roles=list(roles))
-    refresh_tok, _ = create_refresh_token(db, user_id=str(user["id"]), org_id=org_id, user_agent=user_agent, ip=client_ip)
-
-    response.set_cookie(
-        key="edvexa_refresh_token",
-        value=refresh_tok,
-        httponly=True,
-        secure=settings.COOKIE_SECURE,
-        samesite="lax",
-        max_age=settings.REFRESH_TOKEN_DAYS * 86400
-    )
-
-    return {
-        "access_token": access_tok,
-        "token_type": "bearer",
-        "user": {
-            "id": str(user["id"]),
-            "email": user["email"],
-            "full_name": user["full_name"],
-            "status": user["status"]
-        },
-        "organization": {
-            "id": org_id,
-            "name": selected_org["name"],
-            "slug": selected_org["slug"]
-        },
-        "roles": list(roles),
-        "permissions": list(perms),
-        "is_member": bool(is_member),
-        "membership": dict(membership_row) if membership_row else None,
-        "persona_label": persona_label
-    }
-
-@router.post("/select-org")
-def select_org(req: SelectOrgRequest, request: Request, response: Response, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    user_agent = request.headers.get("user-agent", "Unknown")
-
-    # Verify user belongs to org
-    org = db.execute(
-        text("""
-            SELECT o.id, o.name, o.slug, o.status
-            FROM organization_users ou
-            JOIN organizations o ON o.id = ou.organization_id
-            WHERE ou.user_id = :uid AND o.id = :oid AND ou.status = 'ACTIVE' AND o.status = 'ACTIVE'
-        """),
-        {"uid": current_user["id"], "oid": req.organization_id}
-    ).mappings().first()
-
-    if not org:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this organization.")
-
-    org_id = str(org["id"])
-
-    # Load current academic term for org
-    term_row = db.execute(
-        text("SELECT id FROM academic_terms WHERE organization_id = :oid AND is_current = true"),
-        {"oid": org_id}
-    ).mappings().first()
-    term_id = str(term_row["id"]) if term_row else None
-
-    # Load roles
-    roles = db.execute(
-        text("""
-            SELECT DISTINCT r.code
-            FROM user_roles ur
-            JOIN roles r ON r.id = ur.role_id
-            WHERE ur.user_id = :uid AND ur.organization_id = :oid AND ur.revoked_at IS NULL
-              AND (ur.term_id IS NULL OR CAST(:tid AS UUID) IS NULL OR ur.term_id = CAST(:tid AS UUID))
-        """),
-        {"uid": current_user["id"], "oid": org_id, "tid": term_id}
-    ).scalars().all()
-
-    # Load permissions
-    perms = db.execute(
-        text("SELECT permission_code FROM fn_user_permissions(:uid, :oid)"),
-        {"uid": current_user["id"], "oid": org_id}
-    ).scalars().all()
-
-    # Derived is_member
-    is_member = db.execute(
-        text("SELECT fn_is_member(:uid, :oid)"),
-        {"uid": current_user["id"], "oid": org_id}
-    ).scalar() or False
-
-    membership_row = db.execute(
-        text("""
-            SELECT m.*, mp.name as plan_name 
-            FROM memberships m
-            JOIN membership_plans mp ON mp.id = m.plan_id
-            WHERE m.user_id = :uid AND m.organization_id = :oid AND m.status = 'ACTIVE'
-            ORDER BY m.end_date DESC LIMIT 1
-        """),
-        {"uid": current_user["id"], "oid": org_id}
-    ).mappings().first()
-
-    persona_label = "MEMBER" if is_member else ("STAFF" if len(roles) > 0 else "GUEST")
-
-    access_tok = create_access_token(user_id=str(current_user["id"]), org_id=org_id, roles=list(roles))
-    refresh_tok, _ = create_refresh_token(db, user_id=str(current_user["id"]), org_id=org_id, user_agent=user_agent, ip=client_ip)
-
-    response.set_cookie(
-        key="edvexa_refresh_token",
-        value=refresh_tok,
-        httponly=True,
-        secure=settings.COOKIE_SECURE,
-        samesite="lax",
-        max_age=settings.REFRESH_TOKEN_DAYS * 86400
-    )
-
-    return {
-        "access_token": access_tok,
-        "token_type": "bearer",
-        "user": {
-            "id": str(current_user["id"]),
-            "email": current_user["email"],
-            "full_name": current_user["full_name"],
-            "status": current_user["status"]
-        },
-        "organization": {
-            "id": org_id,
-            "name": org["name"],
-            "slug": org["slug"]
-        },
-        "roles": list(roles),
-        "permissions": list(perms),
-        "is_member": bool(is_member),
-        "membership": dict(membership_row) if membership_row else None,
-        "persona_label": persona_label
-    }
-
-@router.post("/refresh")
-def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
-    raw_token = request.cookies.get("edvexa_refresh_token")
-    if not raw_token:
-        # Check authorization header or body if needed
-        auth_hdr = request.headers.get("x-refresh-token")
-        if auth_hdr:
-            raw_token = auth_hdr
-
-    if not raw_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token required.")
-
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    user_agent = request.headers.get("user-agent", "Unknown")
-
-    new_raw_token, old_token_row = rotate_refresh_token(db, raw_token, user_agent=user_agent, ip=client_ip)
-
-    if not new_raw_token or not old_token_row:
-        response.delete_cookie("edvexa_refresh_token")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired. Please sign in again.")
-
-    user_id = str(old_token_row["user_id"])
-    org_id = str(old_token_row["organization_id"]) if old_token_row["organization_id"] else None
-
-    # Load user
-    user = db.execute(text("SELECT * FROM users WHERE id = :id"), {"id": user_id}).mappings().first()
-    if not user or user["status"] != "ACTIVE":
-        response.delete_cookie("edvexa_refresh_token")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account is no longer active.")
-
-    # Load roles
-    term_id = None
-    if org_id:
-        term_row = db.execute(
-            text("SELECT id FROM academic_terms WHERE organization_id = :oid AND is_current = true"),
-            {"oid": org_id}
-        ).mappings().first()
-        term_id = str(term_row["id"]) if term_row else None
-
-    roles = db.execute(
-        text("""
-            SELECT DISTINCT r.code
-            FROM user_roles ur
-            JOIN roles r ON r.id = ur.role_id
-            WHERE ur.user_id = :uid 
-              AND ((:oid IS NULL AND ur.organization_id IS NULL) OR (ur.organization_id = :oid))
-              AND ur.revoked_at IS NULL
-              AND (ur.term_id IS NULL OR CAST(:tid AS UUID) IS NULL OR ur.term_id = CAST(:tid AS UUID))
-        """),
-        {"uid": user_id, "oid": org_id, "tid": term_id}
-    ).scalars().all()
-
-    access_tok = create_access_token(user_id=user_id, org_id=org_id, roles=list(roles))
-
-    response.set_cookie(
-        key="edvexa_refresh_token",
-        value=new_raw_token,
-        httponly=True,
-        secure=settings.COOKIE_SECURE,
-        samesite="lax",
-        max_age=settings.REFRESH_TOKEN_DAYS * 86400
-    )
-
-    return {
-        "access_token": access_tok,
-        "token_type": "bearer"
-    }
-
-@router.get("/me")
-def get_me(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    user_id = str(current_user["id"])
-    payload = current_user.get("token_payload", {})
-    org_id = payload.get("org_id")
-
-    # Check if Platform Admin
-    is_platform = db.execute(
-        text("""
-            SELECT 1 FROM user_roles ur
-            JOIN roles r ON r.id = ur.role_id
-            WHERE ur.user_id = :uid AND ur.organization_id IS NULL AND ur.revoked_at IS NULL AND r.code = 'PLATFORM_ADMIN'
-        """),
-        {"uid": user_id}
-    ).scalar()
-
-    if is_platform and not org_id:
-        perms = db.execute(text("SELECT permission_code FROM fn_user_permissions(:uid, NULL)"), {"uid": user_id}).scalars().all()
-        return {
-            "user": {
-                "id": user_id,
-                "email": current_user["email"],
-                "full_name": current_user["full_name"],
-                "status": current_user["status"]
-            },
-            "organization": None,
-            "roles": ["PLATFORM_ADMIN"],
-            "permissions": list(perms),
-            "is_member": False,
-            "membership": None,
-            "persona_label": "PLATFORM_ADMIN"
-        }
-
-    organization = None
-    roles = []
-    permissions = []
-    is_member = False
-    membership = None
-    persona_label = "GUEST"
-
-    if org_id:
-        org_row = db.execute(text("SELECT id, name, slug, status FROM organizations WHERE id = :oid"), {"oid": org_id}).mappings().first()
-        if org_row:
-            organization = {"id": str(org_row["id"]), "name": org_row["name"], "slug": org_row["slug"]}
-
-            term_row = db.execute(
-                text("SELECT id FROM academic_terms WHERE organization_id = :oid AND is_current = true"),
-                {"oid": org_id}
-            ).mappings().first()
-            term_id = str(term_row["id"]) if term_row else None
-
-            # Roles live from DB
-            roles_rows = db.execute(
-                text("""
-                    SELECT DISTINCT r.code
-                    FROM user_roles ur
-                    JOIN roles r ON r.id = ur.role_id
-                    WHERE ur.user_id = :uid AND ur.organization_id = :oid AND ur.revoked_at IS NULL
-                      AND (ur.term_id IS NULL OR CAST(:tid AS UUID) IS NULL OR ur.term_id = CAST(:tid AS UUID))
-                """),
-                {"uid": user_id, "oid": org_id, "tid": term_id}
-            ).scalars().all()
-            roles = list(roles_rows)
-
-            # Permissions live from DB
-            perms_rows = db.execute(
-                text("SELECT permission_code FROM fn_user_permissions(:uid, :oid)"),
-                {"uid": user_id, "oid": org_id}
-            ).scalars().all()
-            permissions = list(perms_rows)
-
-            # Derived member check
-            is_member = bool(db.execute(
-                text("SELECT fn_is_member(:uid, :oid)"),
-                {"uid": user_id, "oid": org_id}
-            ).scalar() or False)
-
-            m_row = db.execute(
-                text("""
-                    SELECT m.*, mp.name as plan_name 
-                    FROM memberships m
-                    JOIN membership_plans mp ON mp.id = m.plan_id
-                    WHERE m.user_id = :uid AND m.organization_id = :oid AND m.status = 'ACTIVE'
-                    ORDER BY m.end_date DESC LIMIT 1
-                """),
-                {"uid": user_id, "oid": org_id}
-            ).mappings().first()
-            membership = dict(m_row) if m_row else None
-            persona_label = "MEMBER" if is_member else ("STAFF" if len(roles) > 0 else "GUEST")
-
-    return {
-        "user": {
-            "id": user_id,
-            "email": current_user["email"],
-            "full_name": current_user["full_name"],
-            "status": current_user["status"]
-        },
-        "organization": organization,
-        "roles": roles,
-        "permissions": permissions,
-        "is_member": is_member,
-        "membership": membership,
-        "persona_label": persona_label
-    }
-
-@router.post("/logout")
-def logout(request: Request, response: Response, db: Session = Depends(get_db)):
-    raw_token = request.cookies.get("edvexa_refresh_token")
-    if raw_token:
-        t_hash = hash_token(raw_token)
-        now = datetime.now(timezone.utc)
-        db.execute(
-            text("UPDATE refresh_tokens SET revoked_at = :now, revoked_reason = 'user_logout' WHERE token_hash = :thash"),
-            {"now": now, "thash": t_hash}
-        )
-        db.commit()
-
-    response.delete_cookie("edvexa_refresh_token")
-    return {"message": "Logged out successfully."}
-
-@router.post("/logout-all")
-def logout_all(response: Response, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    now = datetime.now(timezone.utc)
-    db.execute(
-        text("UPDATE refresh_tokens SET revoked_at = :now, revoked_reason = 'logout_all' WHERE user_id = :uid"),
-        {"now": now, "uid": current_user["id"]}
-    )
-    db.commit()
-
-    response.delete_cookie("edvexa_refresh_token")
-    return {"message": "All sessions terminated."}
 
 @router.post("/forgot-password")
-def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    user = db.execute(
-        text("SELECT * FROM users WHERE email = :email"),
-        {"email": req.email.strip().lower()}
-    ).mappings().first()
+def forgot(data:ForgotPasswordRequest,db:Session=Depends(get_db)):
+    return request_link(data,db,"PASSWORD_RESET")
 
-    if user and user["status"] == "ACTIVE":
-        now = datetime.now(timezone.utc)
-        raw_token = secrets.token_urlsafe(32)
-        t_hash = hash_token(raw_token)
-        expires = now + timedelta(hours=1)
 
-        db.execute(
-            text("""
-                INSERT INTO auth_tokens (user_id, purpose, token_hash, expires_at, created_at)
-                VALUES (:uid, 'PASSWORD_RESET', :thash, :exp, :now)
-            """),
-            {"uid": user["id"], "thash": t_hash, "exp": expires, "now": now}
-        )
+@router.post("/resend-verification")
+def resend(data:ForgotPasswordRequest,db:Session=Depends(get_db)):
+    return request_link(data,db,"EMAIL_VERIFY")
+
+
+def request_link(data,db,purpose):
+    user=db.execute(text("SELECT * FROM users WHERE email=:email FOR UPDATE"),dict(email=str(data.email).lower())).mappings().first()
+    required="ACTIVE" if purpose=="PASSWORD_RESET" else "PENDING_EMAIL_VERIFICATION"
+    if user and user["status"]==required:
+        raw=s.issue_auth_token(db,user,purpose)
         db.commit()
+        send_link(user,raw,purpose)
+    return {"message":"If the account is eligible, a link has been sent."}
 
-        reset_link = f"{settings.APP_BASE_URL}/reset-password?token={raw_token}"
-        send_email_notification(
-            recipient=user["email"],
-            subject="EDVEXA Password Reset",
-            message="You requested a password reset. This single-use link is valid for 1 hour.",
-            link=reset_link
-        )
 
-    return {"message": "If that email address exists in our system, password reset instructions have been sent."}
+@router.post("/login")
+def login(data:LoginRequest,request:Request,response:Response,db:Session=Depends(get_db)):
+    s.trusted_origin(request)
+    email=str(data.email).lower()
+    ip=request.client.host if request.client else "unknown"
+    recent=db.execute(text("SELECT count(*) FROM login_attempts WHERE ip=:ip AND NOT successful AND created_at>now()-interval '15 minutes'"),dict(ip=ip)).scalar()
+    if recent>=30:
+        s.fail("Too many attempts from this address. Try again in 15 minutes.",429)
+    user=db.execute(text("SELECT * FROM users WHERE email=:email FOR UPDATE"),dict(email=email)).mappings().first()
+    if user and user["locked_until"] and user["locked_until"]>datetime.now(UTC):
+        s.fail("Account is locked. Try again in 15 minutes.",429)
+    valid=s.verify_password(data.password,user["password_hash"] if user else s.DUMMY_HASH)
+    db.execute(text("INSERT INTO login_attempts(email,ip,successful,user_agent) VALUES(:email,:ip,:ok,:ua)"),dict(email=email,ip=ip,ok=bool(user and valid),ua=request.headers.get("user-agent","")[:500]))
+    if not user or not valid:
+        if user:
+            failures=db.execute(text("SELECT count(*) FROM login_attempts WHERE email=:email AND NOT successful AND created_at>now()-interval '15 minutes'"),dict(email=email)).scalar()
+            db.execute(text("UPDATE users SET failed_login_count=:count,locked_until=:lock WHERE id=:uid"),dict(count=failures,lock=datetime.now(UTC)+timedelta(minutes=15) if failures>=5 else None,uid=user["id"]))
+            if failures>=5:
+                s.audit(db,"ACCOUNT_LOCKED",user,target=user["id"])
+        db.commit()
+        s.fail("Invalid email or password")
+    if user["status"]!="ACTIVE" or not user["email_verified_at"]:
+        s.fail("Account must be active and email verified",403)
+    db.execute(text("UPDATE users SET failed_login_count=0,locked_until=NULL,last_login_at=now() WHERE id=:uid"),dict(uid=user["id"]))
+    context=s.session_context(db,user)
+    active=[o for o in context["organizations"] if o["status"]=="ACTIVE"]
+    if context["organizations"] and not active:
+        s.fail("Your organization is suspended",403)
+    org=active[0]["id"] if len(active)==1 else None
+    return tokens(db,user,org,request,response)
 
-@router.post("/reset-password")
-def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
-    t_hash = hash_token(req.token.strip())
-    now = datetime.now(timezone.utc)
 
-    tok = db.execute(
-        text("""
-            SELECT * FROM auth_tokens 
-            WHERE token_hash = :thash AND purpose = 'PASSWORD_RESET' AND used_at IS NULL
-        """),
-        {"thash": t_hash}
-    ).mappings().first()
+@router.get("/me")
+@router.get("/context",include_in_schema=False)
+def me(user:dict=Depends(get_current_user),db:Session=Depends(get_db)):
+    return s.session_context(db,user,user["token_payload"]["org_id"])
 
-    if not tok:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token.")
 
-    if tok["expires_at"] < now:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password reset token has expired.")
-
-    # Update password and revoke all sessions
-    new_hash = hash_password(req.new_password)
-    db.execute(
-        text("UPDATE users SET password_hash = :pw, must_change_password = false WHERE id = :uid"),
-        {"pw": new_hash, "uid": tok["user_id"]}
-    )
-    db.execute(
-        text("UPDATE auth_tokens SET used_at = :now WHERE id = :id"),
-        {"now": now, "id": tok["id"]}
-    )
-    db.execute(
-        text("UPDATE refresh_tokens SET revoked_at = :now, revoked_reason = 'password_reset' WHERE user_id = :uid"),
-        {"now": now, "uid": tok["user_id"]}
-    )
+@router.patch("/profile")
+def profile(data:ProfileUpdate,user:dict=Depends(get_current_user),db:Session=Depends(get_db)):
+    db.execute(text("UPDATE users SET full_name=:name,phone=:phone WHERE id=:uid"),dict(name=data.full_name.strip(),phone=data.phone,uid=user["id"]))
     db.commit()
+    return {"message":"Profile saved"}
 
-    return {"message": "Password updated successfully. Please log in with your new credentials."}
+
+@router.post("/select-org")
+def select_org(data:SelectOrgRequest,request:Request,response:Response,user:dict=Depends(get_current_user),db:Session=Depends(get_db)):
+    if s.live_roles(db,user["id"],None):
+        s.fail("Platform accounts cannot select an organization",403)
+    user=dict(db.execute(text("SELECT * FROM users WHERE id=:uid FOR UPDATE"),dict(uid=user["id"])).mappings().one())|{"token_payload":user["token_payload"]}
+    s.session_context(db,user,data.organization_id)
+    s.revoke_family(db,user["token_payload"]["sid"],"ORG_SWITCH")
+    return tokens(db,user,data.organization_id,request,response)
+
+
+@router.post("/join-org")
+def join(data:JoinOrgRequest,request:Request,response:Response,user:dict=Depends(get_current_user),db:Session=Depends(get_db)):
+    if s.live_roles(db,user["id"],None):
+        s.fail("Platform accounts cannot join organizations",403)
+    org=db.execute(text("SELECT id FROM organizations WHERE join_code=:code AND status='ACTIVE' FOR UPDATE"),dict(code=data.join_code.strip())).scalar()
+    if not org:
+        s.fail("Invalid organization code",400)
+    row=db.execute(text("SELECT status FROM organization_users WHERE organization_id=:org AND user_id=:uid"),dict(org=org,uid=user["id"])).scalar()
+    if row and row!="ACTIVE":
+        s.fail("Organization access is suspended",403)
+    db.execute(text("INSERT INTO organization_users(organization_id,user_id,student_id,joined_via) VALUES(:org,:uid,:student,'JOIN_CODE') ON CONFLICT(organization_id,user_id) DO NOTHING"),dict(org=org,uid=user["id"],student=data.student_id))
+    s.audit(db,"ORGANIZATION_JOIN",user,org,user["id"])
+    s.revoke_family(db,user["token_payload"]["sid"],"ORG_SWITCH")
+    return tokens(db,user,org,request,response)
+
+
+@router.get("/csrf")
+def csrf(request:Request,db:Session=Depends(get_db)):
+    s.trusted_origin(request)
+    pair=s.lock_refresh(db,request.cookies.get(COOKIE))
+    if not pair:
+        s.fail()
+    user,row=pair
+    if row["revoked_at"] or row["expires_at"]<=datetime.now(UTC) or user["status"]!="ACTIVE" or row["credential_version"]!=user["credential_version"]:
+        s.fail()
+    return {"csrf_token":s.csrf_token(row["family_id"])}
+
+
+@router.post("/refresh")
+def refresh(request:Request,response:Response,db:Session=Depends(get_db)):
+    s.trusted_origin(request)
+    pair=s.lock_refresh(db,request.cookies.get(COOKIE))
+    if not pair:
+        s.fail()
+    user,row=pair
+    s.check_csrf(request,row["family_id"])
+    if row["revoked_at"] or row["expires_at"]<=datetime.now(UTC) or user["status"]!="ACTIVE" or not user["email_verified_at"] or row["credential_version"]!=user["credential_version"]:
+        s.revoke_family(db,row["family_id"],"REUSE_OR_INVALID")
+        db.commit()
+        s.fail()
+    db.execute(text("UPDATE refresh_tokens SET revoked_at=now(),revoked_reason='ROTATED' WHERE id=:id"),dict(id=row["id"]))
+    return tokens(db,user,row["organization_id"],request,response,row["family_id"],row["expires_at"])
+
+
+@router.post("/logout")
+def logout(request:Request,response:Response,db:Session=Depends(get_db)):
+    s.trusted_origin(request)
+    pair=s.lock_refresh(db,request.cookies.get(COOKIE))
+    if pair:
+        user,row=pair
+        s.check_csrf(request,row["family_id"])
+        s.revoke_family(db,row["family_id"],"LOGOUT")
+        db.commit()
+    clear_cookie(response)
+    return {"message":"Signed out"}
+
+
+@router.post("/logout-all")
+def logout_all(response:Response,user:dict=Depends(get_current_user),db:Session=Depends(get_db)):
+    db.execute(text("SELECT id FROM users WHERE id=:uid FOR UPDATE"),dict(uid=user["id"]))
+    s.revoke_all(db,user["id"],"LOGOUT_ALL")
+    db.commit()
+    clear_cookie(response)
+    return {"message":"All sessions ended"}
+
+
+def update_password(db,user,password):
+    db.execute(text("UPDATE users SET password_hash=:hash,credential_version=credential_version+1,must_change_password=false WHERE id=:uid"),dict(hash=s.hash_password(password),uid=user["id"]))
+    db.execute(text("UPDATE auth_tokens SET used_at=now() WHERE user_id=:uid AND purpose='PASSWORD_RESET'"),dict(uid=user["id"]))
+    s.revoke_all(db,user["id"])
+    s.audit(db,"PASSWORD_CHANGED",user,target=user["id"])
+
 
 @router.post("/change-password")
-def change_password(req: ChangePasswordRequest, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not verify_password(req.old_password, current_user["password_hash"]):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect existing password.")
-
-    new_hash = hash_password(req.new_password)
-    now = datetime.now(timezone.utc)
-
-    db.execute(
-        text("UPDATE users SET password_hash = :pw, must_change_password = false WHERE id = :uid"),
-        {"pw": new_hash, "uid": current_user["id"]}
-    )
-    db.execute(
-        text("UPDATE refresh_tokens SET revoked_at = :now, revoked_reason = 'password_changed' WHERE user_id = :uid"),
-        {"now": now, "uid": current_user["id"]}
-    )
+def change(data:ChangePasswordRequest,response:Response,user:dict=Depends(get_current_user),db:Session=Depends(get_db)):
+    row=db.execute(text("SELECT * FROM users WHERE id=:uid FOR UPDATE"),dict(uid=user["id"])).mappings().one()
+    if not s.verify_password(data.current_password,row["password_hash"]):
+        s.fail("Current password is incorrect",400)
+    update_password(db,row,data.new_password)
     db.commit()
+    clear_cookie(response)
+    return {"message":"Password changed; sign in again on all devices"}
 
-    return {"message": "Password changed successfully. Active sessions revoked."}
 
-@router.get("/sessions", response_model=list[AuthSessionResponse])
-def get_sessions(request: Request, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    current_token = request.cookies.get("edvexa_refresh_token")
-    current_hash = hash_token(current_token) if current_token else None
+@router.post("/reset-password")
+def reset(data:ResetPasswordRequest,response:Response,db:Session=Depends(get_db)):
+    user,tok=s.lock_auth_token(db,data.token,"PASSWORD_RESET")
+    if user["status"]!="ACTIVE":
+        s.fail("Account is not active",400)
+    update_password(db,user,data.new_password)
+    db.commit()
+    clear_cookie(response)
+    return {"message":"Password reset; sign in again"}
 
-    rows = db.execute(
-        text("""
-            SELECT id, user_agent, ip, last_used_at, token_hash
-            FROM refresh_tokens
-            WHERE user_id = :uid AND revoked_at IS NULL AND expires_at > now()
-            ORDER BY last_used_at DESC
-        """),
-        {"uid": current_user["id"]}
-    ).mappings().all()
 
-    sessions = []
-    for r in rows:
-        sessions.append({
-            "id": str(r["id"]),
-            "user_agent": r["user_agent"],
-            "ip": r["ip"],
-            "last_used_at": r["last_used_at"],
-            "is_current": (r["token_hash"] == current_hash)
-        })
+@router.get("/sessions")
+def sessions(user:dict=Depends(get_current_user),db:Session=Depends(get_db)):
+    rows=db.execute(text("""SELECT family_id AS id,user_agent,ip,created_at,last_used_at,expires_at FROM refresh_tokens
+    WHERE user_id=:uid AND revoked_at IS NULL AND expires_at>now() ORDER BY created_at DESC"""),dict(uid=user["id"])).mappings()
+    return [{**dict(r),"is_current":str(r["id"])==user["token_payload"]["sid"]} for r in rows]
 
-    return sessions
 
 @router.post("/accept-invite")
-def accept_invite(req: AcceptInviteRequest, db: Session = Depends(get_db)):
-    t_hash = hash_token(req.token.strip())
-    now = datetime.now(timezone.utc)
-
-    inv = db.execute(
-        text("SELECT * FROM invitations WHERE token_hash = :thash AND accepted_at IS NULL AND revoked_at IS NULL"),
-        {"thash": t_hash}
-    ).mappings().first()
-
-    if not inv:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invitation token.")
-
-    if inv["expires_at"] < now:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitation has expired.")
-
-    # Check if user already exists
-    user = db.execute(
-        text("SELECT * FROM users WHERE email = :email"),
-        {"email": inv["email"]}
-    ).mappings().first()
-
-    pw_hash = hash_password(req.password)
-
-    if not user:
-        user_id = str(uuid.uuid4())
-        full_name = req.full_name or inv["email"].split("@")[0].title()
-        db.execute(
-            text("""
-                INSERT INTO users (id, email, password_hash, full_name, status, email_verified_at, created_via, created_at)
-                VALUES (:id, :email, :pw, :name, 'ACTIVE', :now, 'INVITE', :now)
-            """),
-            {
-                "id": user_id,
-                "email": inv["email"],
-                "pw": pw_hash,
-                "name": full_name,
-                "now": now
-            }
-        )
+def accept(data:AcceptInviteRequest,request:Request,db:Session=Depends(get_db)):
+    invitation=db.execute(text("SELECT * FROM invitations WHERE token_hash=:hash FOR UPDATE"),dict(hash=s.hash_token(data.token))).mappings().first()
+    if not invitation or invitation["accepted_at"] or invitation["revoked_at"] or invitation["expires_at"]<=datetime.now(UTC):
+        s.fail("Invalid or expired invitation",400)
+    org=db.execute(text("SELECT * FROM organizations WHERE id=:org AND status='ACTIVE' FOR UPDATE"),dict(org=invitation["organization_id"])).mappings().first()
+    role=db.execute(text("SELECT code FROM roles WHERE id=:id"),dict(id=invitation["role_id"])).scalar()
+    term=db.execute(text("SELECT id FROM academic_terms WHERE organization_id=:org AND is_current AND CURRENT_DATE BETWEEN start_date AND end_date"),dict(org=invitation["organization_id"])).scalar()
+    if not org or role=="PLATFORM_ADMIN" or not term or (invitation["term_id"] and invitation["term_id"]!=term):
+        s.fail("Invitation is no longer valid for this organization and term",400)
+    user=db.execute(text("SELECT * FROM users WHERE email=:email FOR UPDATE"),dict(email=invitation["email"])).mappings().first()
+    if user:
+        from fastapi.security import HTTPAuthorizationCredentials
+        header=request.headers.get("authorization","")
+        if not header.startswith("Bearer "):
+            s.fail("Sign in with the invited email before accepting this invitation")
+        current=get_current_user(request,HTTPAuthorizationCredentials(scheme="Bearer",credentials=header[7:]),db)
+        if current["id"]!=user["id"] or s.live_roles(db,user["id"],None):
+            s.fail("Sign in with the invited organization account",403)
     else:
-        user_id = str(user["id"])
-        db.execute(
-            text("UPDATE users SET password_hash = :pw, status = 'ACTIVE', email_verified_at = :now WHERE id = :id"),
-            {"pw": pw_hash, "now": now, "id": user_id}
-        )
-
-    # Attach to organization
-    org_id = inv["organization_id"]
-    if org_id:
-        db.execute(
-            text("""
-                INSERT INTO organization_users (organization_id, user_id, status, joined_via, created_at)
-                VALUES (:oid, :uid, 'ACTIVE', 'INVITE', :now)
-                ON CONFLICT (organization_id, user_id) DO UPDATE SET status = 'ACTIVE'
-            """),
-            {"oid": org_id, "uid": user_id, "now": now}
-        )
-
-        # Assign role
-        db.execute(
-            text("""
-                INSERT INTO user_roles (user_id, role_id, organization_id, assigned_by, valid_from, created_at)
-                VALUES (:uid, :rid, :oid, :aby, :now, :now)
-            """),
-            {
-                "uid": user_id,
-                "rid": inv["role_id"],
-                "oid": org_id,
-                "aby": inv["invited_by"],
-                "now": now
-            }
-        )
-
-    # Mark invitation accepted
-    db.execute(
-        text("UPDATE invitations SET accepted_at = :now WHERE id = :id"),
-        {"now": now, "id": inv["id"]}
-    )
+        if not data.password or not data.full_name:
+            s.fail("Full name and password are required for a new account",422)
+        user=db.execute(text("""INSERT INTO users(email,password_hash,full_name,status,email_verified_at,created_via)
+        VALUES(:email,:hash,:name,'ACTIVE',now(),'INVITE') RETURNING *"""),dict(email=invitation["email"],hash=s.hash_password(data.password),name=data.full_name.strip())).mappings().one()
+    existing=db.execute(text("SELECT status FROM organization_users WHERE organization_id=:org AND user_id=:uid"),dict(org=org["id"],uid=user["id"])).scalar()
+    if existing and existing!="ACTIVE":
+        s.fail("This account is suspended in the organization",403)
+    db.execute(text("INSERT INTO organization_users(organization_id,user_id,joined_via) VALUES(:org,:uid,'INVITE') ON CONFLICT(organization_id,user_id) DO NOTHING"),dict(org=org["id"],uid=user["id"]))
+    db.execute(text("INSERT INTO user_roles(user_id,organization_id,role_id,term_id,assigned_by) VALUES(:uid,:org,:role,:term,:actor) ON CONFLICT DO NOTHING"),dict(uid=user["id"],org=org["id"],role=invitation["role_id"],term=term,actor=invitation["invited_by"]))
+    db.execute(text("UPDATE invitations SET accepted_at=now() WHERE id=:id"),dict(id=invitation["id"]))
+    s.audit(db,"ORG_ADMIN_CREATED" if role=="ORG_ADMIN" else "INVITATION_ACCEPTED",dict(user),org["id"],user["id"])
     db.commit()
-
-    return {"message": "Invitation accepted successfully. You may now sign in."}
+    return {"message":"Invitation accepted. Sign in to continue."}

@@ -104,7 +104,7 @@ export default function PlatformOrganizations() {
       if (res?.invite_url) {
         setInviteUrl(res.invite_url);
       }
-      alert(`Invitation sent to ${adminEmailInput}`);
+      alert("Invitation link created. Share it with the intended recipient.");
     } catch (err) {
       alert(err.message || "Failed to invite organization admin");
     }

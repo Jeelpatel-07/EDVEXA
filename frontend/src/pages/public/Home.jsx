@@ -20,9 +20,9 @@ export default function Home() {
   const [plans, setPlans] = useState([]);
 
   useEffect(() => {
-    eventApi.getEvents().then((data) => setEvents(data.slice(0, 3)));
-    announcementApi.getAnnouncements().then((data) => setAnnouncements(data.slice(0, 3)));
-    membershipApi.getPlans().then((data) => setPlans(data));
+    eventApi.getEvents().then((data) => setEvents((data || []).slice(0, 3))).catch(() => {});
+    announcementApi.getAnnouncements().then((data) => setAnnouncements((data || []).slice(0, 3))).catch(() => {});
+    membershipApi.getPlans().then((data) => setPlans(data || [])).catch(() => {});
   }, []);
 
   return (

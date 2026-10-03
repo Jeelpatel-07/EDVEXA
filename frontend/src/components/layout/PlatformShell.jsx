@@ -20,7 +20,7 @@ export default function PlatformShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout, personaKey, loginAsPersona } = useAuth();
+  const { user, logout } = useAuth();
 
   const navItems = [
     { label: "Platform Overview", to: "/platform/dashboard", icon: LayoutDashboard },
@@ -29,8 +29,8 @@ export default function PlatformShell() {
     { label: "Platform Audit Logs", to: "/platform/audit-logs", icon: FileText },
   ];
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate("/login");
   };
 

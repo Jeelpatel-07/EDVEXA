@@ -10,6 +10,12 @@ export const claimApi = {
   },
 
   getClaimById: async (id) => {
+    try {
+      const single = await apiClient.get(`/orgs/${getCurrentOrgId()}/finance/claims/${id}`);
+      if (single) return single;
+    } catch (e) {
+      console.warn("Direct claim lookup failed, falling back to list:", e);
+    }
     const list = await claimApi.getAllClaims();
     return list.find((c) => c.id === id) || null;
   },
@@ -39,6 +45,8 @@ export const claimApi = {
 
   rejectClaim: async (claimId, reason) => {
     return await apiClient.post(`/orgs/${getCurrentOrgId()}/finance/claims/${claimId}/reject`, {
+      action: "REJECT",
+      reject_reason: reason || "Rejected by treasurer",
       reason: reason || "Rejected by treasurer",
     });
   },

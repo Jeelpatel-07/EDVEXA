@@ -139,7 +139,7 @@ def create_organization(req: OrganizationCreate, admin: dict = Depends(require_p
             }
         )
 
-        invite_url = f"{settings.APP_BASE_URL}/accept-invite?token={raw_tok}"
+        invite_url = f"{settings.APP_BASE_URL}/accept-invite#token={raw_tok}"
         send_email_notification(
             recipient=req.admin_email,
             subject=f"You are invited to administrate {req.name} on EDVEXA",
@@ -333,7 +333,7 @@ def invite_org_admin(id: str, req: OrgAdminInvite, admin: dict = Depends(require
     )
     db.commit()
 
-    invite_url = f"{settings.APP_BASE_URL}/accept-invite?token={raw_tok}"
+    invite_url = f"{settings.APP_BASE_URL}/accept-invite#token={raw_tok}"
     send_email_notification(
         recipient=req.email,
         subject=f"Organization Administrator Invitation for {org['name']}",

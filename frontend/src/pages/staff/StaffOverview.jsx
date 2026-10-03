@@ -130,7 +130,7 @@ export default function StaffOverview() {
         {canViewFinance && (
           <StatCard
             title="Closing Cash Balance"
-            value={finance ? `$${finance.closingCash.toFixed(2)}` : "$0.00"}
+            value={`$${Number(finance?.closingCash ?? finance?.net_balance ?? finance?.closing_cash ?? 0).toFixed(2)}`}
             subtext="Verified Organization Treasury"
             icon={DollarSign}
           />
@@ -149,7 +149,7 @@ export default function StaffOverview() {
           <StatCard
             title="Claims Needing Review"
             value={pendingClaims.length}
-            subtext={finance ? `$${finance.approvedClaimsAwaitingPayment.toFixed(2)} awaiting payment` : "Pending audit"}
+            subtext={finance ? `$${Number(finance?.approvedClaimsAwaitingPayment ?? finance?.pending_claims_amount ?? 0).toFixed(2)} awaiting payment` : "Pending audit"}
             icon={FileSpreadsheet}
           />
         )}

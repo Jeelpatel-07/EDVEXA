@@ -1,6 +1,7 @@
 import apiClient, { getCurrentOrgId } from "./axios";
 
 export const userApi = {
+  updateRoles: (userId, roles) => apiClient.put(`/orgs/${getCurrentOrgId()}/users/${userId}/roles`, { roles: roles.filter((r) => ["TREASURER", "EVENT_MANAGER", "GATE_STAFF", "VOLUNTEER"].includes(r)) }),
   getUsers: async (params = {}) => {
     return await apiClient.get(`/orgs/${getCurrentOrgId()}/users`, { params });
   },

@@ -9,9 +9,9 @@ export default function AccessDenied({
   requiredPermission,
   requiredRole,
 }) {
-  const { roles, user, organization, isPlatformAdmin } = useAuth();
+  const { roles, user, organization, isPlatformAdmin, hasStaffAccess } = useAuth();
 
-  const destination = isPlatformAdmin() ? "/platform/dashboard" : "/app/dashboard";
+  const destination = isPlatformAdmin() ? "/platform/dashboard" : (hasStaffAccess ? "/app/manage" : "/app/dashboard");
 
   return (
     <div className="min-h-[70vh] flex items-center justify-center p-4 sm:p-6 bg-slate-50/50">

@@ -5,6 +5,10 @@ export const financeApi = {
     return await apiClient.get(`/orgs/${getCurrentOrgId()}/finance/summary`);
   },
 
+  getReports: async (timeframe) => {
+    return await apiClient.get(`/orgs/${getCurrentOrgId()}/finance/reports`, { params: { timeframe } });
+  },
+
   getLedgerEntries: async (params = {}) => {
     return await apiClient.get(`/orgs/${getCurrentOrgId()}/finance/ledger`, { params });
   },

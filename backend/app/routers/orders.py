@@ -108,19 +108,47 @@ def list_all_orders(
             {"oid": o["id"]}
         ).mappings().all()
 
+        merch_items = [i for i in items if i.get("variant_id")]
+        if not merch_items:
+            pickup_status = "NOT_APPLICABLE"
+        elif all(i.get("fulfillment_status") == "PICKED_UP" for i in merch_items):
+            pickup_status = "PICKED_UP"
+        elif any(i.get("fulfillment_status") in ("READY", "READY_FOR_PICKUP") for i in merch_items):
+            pickup_status = "READY_FOR_PICKUP"
+        elif o["status"] == "PAID":
+            pickup_status = "READY_FOR_PICKUP"
+        else:
+            pickup_status = "PENDING"
+
+        formatted_items = []
+        for i in items:
+            title = i["product_name"] or i["ticket_name"] or i["plan_name"] or "Item"
+            formatted_items.append({
+                **dict(i),
+                "title": title,
+                "quantity": i["quantity"],
+                "unit_price": float(i["unit_price"]),
+                "fulfillment_status": i["fulfillment_status"],
+            })
+
         results.append({
             "id": str(o["id"]),
             "order_number": o["order_number"],
+            "orderNumber": o["order_number"],
             "customer_name": o["full_name"],
             "customer_email": o["email"],
             "order_type": o["order_type"],
+            "type": o["order_type"],
             "status": o["status"],
             "subtotal": float(o["subtotal"]),
             "discount_total": float(o["discount_total"]),
             "total": float(o["total"]),
+            "totalAmount": float(o["total"]),
+            "pickup_status": pickup_status,
+            "pickupStatus": pickup_status,
             "expires_at": str(o["expires_at"]),
             "created_at": str(o["created_at"]),
-            "items": [dict(i) for i in items]
+            "items": formatted_items
         })
     return results
 
@@ -199,3 +227,25 @@ def pay_order(
         return paid_order
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+@router.patch("/{order_id}/pickup")
+def mark_order_picked_up(
+    order_id: str,
+    org_ctx: OrgContext = Depends(require_permission("orders.view_all")),
+    db: Session = Depends(get_db)
+):
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    order = db.execute(
+        text("SELECT * FROM orders WHERE id = :id AND organization_id = :oid"),
+        {"id": order_id, "oid": org_ctx.org_id}
+    ).mappings().first()
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+
+    db.execute(
+        text("UPDATE order_items SET fulfillment_status = 'PICKED_UP', updated_at = :now WHERE order_id = :oid AND variant_id IS NOT NULL"),
+        {"now": now, "oid": order_id}
+    )
+    db.commit()
+    return {"message": "Order marked as picked up.", "order_id": order_id, "pickup_status": "PICKED_UP"}

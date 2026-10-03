@@ -30,46 +30,22 @@ def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db)
 ) -> dict:
-    token = None
-    if credentials:
-        token = credentials.credentials
-    else:
-        # Fallback to cookie if present
-        token = request.cookies.get("edvexa_access_token")
-
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required. Please provide a valid bearer token.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    payload = decode_access_token(token)
-    if not payload or "sub" not in payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session has expired or token is invalid.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    user_id = payload["sub"]
-    user = db.execute(
-        text("SELECT * FROM users WHERE id = :uid"),
-        {"uid": user_id}
-    ).mappings().first()
-
+    if not credentials or len(credentials.credentials)>4096:
+        raise HTTPException(401,"Authentication required")
+    payload=decode_access_token(credentials.credentials)
+    user=db.execute(text("SELECT * FROM users WHERE id=:uid"),{"uid":payload["sub"]}).mappings().first()
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User account not found.")
+        raise HTTPException(401,"Please sign in again")
+    if user["status"]!="ACTIVE" or user["email_verified_at"] is None:
+        raise HTTPException(403,"Account is not active and verified")
+    live=db.execute(text("""SELECT 1 FROM refresh_tokens WHERE user_id=:uid AND family_id=:family
+       AND revoked_at IS NULL AND expires_at>now() AND credential_version=:version
+       AND organization_id IS NOT DISTINCT FROM CAST(:org AS uuid)"""),
+       dict(uid=user["id"],family=payload["sid"],version=user["credential_version"],org=payload["org_id"])).scalar()
+    if not live:
+        raise HTTPException(401,"Session has ended; sign in again")
+    return {**dict(user),"token_payload":payload}
 
-    if user["status"] != "ACTIVE":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User account is {user['status'].lower().replace('_', ' ')}."
-        )
-
-    user_dict = dict(user)
-    user_dict["token_payload"] = payload
-    return user_dict
 
 def require_platform_admin(
     current_user: dict = Depends(get_current_user),
@@ -114,6 +90,11 @@ def get_current_org_context(
             detail="No organization specified in request."
         )
 
+    if str(org_id)!=str(token_org_id):
+        raise HTTPException(403,"Select this organization before accessing it")
+    if db.execute(text("SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=:uid AND r.code='PLATFORM_ADMIN' AND ur.revoked_at IS NULL"),dict(uid=current_user["id"])).scalar():
+        raise HTTPException(403,"Platform accounts cannot access organization resources")
+
     # 2. Check organization exists & is ACTIVE
     org = db.execute(
         text("SELECT * FROM organizations WHERE id = :oid"),
@@ -149,7 +130,7 @@ def get_current_org_context(
 
     # 4. Find current academic term for org
     term_row = db.execute(
-        text("SELECT id FROM academic_terms WHERE organization_id = :oid AND is_current = true"),
+        text("SELECT id FROM academic_terms WHERE organization_id = :oid AND is_current = true AND CURRENT_DATE BETWEEN start_date AND end_date"),
         {"oid": org_id}
     ).mappings().first()
     term_id = str(term_row["id"]) if term_row else None
@@ -164,7 +145,7 @@ def get_current_org_context(
               AND ur.organization_id = :oid
               AND ur.revoked_at IS NULL
               AND (ur.valid_to IS NULL OR ur.valid_to >= now())
-              AND (ur.term_id IS NULL OR CAST(:tid AS UUID) IS NULL OR ur.term_id = CAST(:tid AS UUID))
+              AND ur.valid_from <= now() AND ur.term_id = CAST(:tid AS UUID)
         """),
         {"uid": current_user["id"], "oid": org_id, "tid": term_id}
     ).scalars().all()

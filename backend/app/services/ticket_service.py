@@ -16,7 +16,7 @@ def scan_ticket(db: Session, code: str, scanner_user_id: str, scanner_org_id: st
             JOIN users u ON u.id = t.user_id
             JOIN events e ON e.id = t.event_id
             JOIN ticket_types tt ON tt.id = t.ticket_type_id
-            WHERE t.ticket_code = :code
+            WHERE t.ticket_code = :code FOR UPDATE OF t
         """),
         {"code": code.strip()}
     ).mappings().first()

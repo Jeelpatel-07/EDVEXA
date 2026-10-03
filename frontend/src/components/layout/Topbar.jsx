@@ -58,6 +58,7 @@ export default function Topbar({ onOpenMobile }) {
 
   return (
     <header className="h-16 bg-card border-b border-border px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30 shadow-2xs">
+      <Link to="/organizations" className="text-xs text-teal-700 mr-3">Switch organization</Link>
       {/* Left: Mobile hamburger & Organization context */}
       <div className="flex items-center gap-3">
         <button

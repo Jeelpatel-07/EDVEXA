@@ -63,21 +63,9 @@ def get_ticket_detail(
     return dict(ticket)
 
 @router.get("/{ticket_id}/qr")
-def get_ticket_qr(
-    ticket_id: str,
-    org_ctx: OrgContext = Depends(get_current_org_context),
-    db: Session = Depends(get_db)
-):
-    ticket = db.execute(
-        text("SELECT ticket_code FROM tickets WHERE id = :id AND organization_id = :oid"),
-        {"id": ticket_id, "oid": org_ctx.org_id}
-    ).mappings().first()
-
-    if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found.")
-
-    png_bytes = generate_qr_png_bytes(ticket["ticket_code"])
-    return Response(content=png_bytes, media_type="image/png")
+def get_ticket_qr(ticket_id:str,current_user:dict=Depends(get_current_user),org_ctx:OrgContext=Depends(get_current_org_context),db:Session=Depends(get_db)):
+    ticket=get_ticket_detail(ticket_id,current_user,org_ctx,db)
+    return Response(content=generate_qr_png_bytes(ticket["ticket_code"]),media_type="image/png")
 
 @router.post("/scan", response_model=TicketScanResponse)
 def scan_ticket_endpoint(

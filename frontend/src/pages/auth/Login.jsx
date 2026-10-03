@@ -25,18 +25,30 @@ export default function Login() {
       const res = await login({ email, password });
       const roles = res?.roles || [];
 
-      // Requirement 10d: Post-login redirect
-      if (destination && destination !== "/login") {
-        navigate(destination, { replace: true });
-      } else if (roles.includes(ROLES.PLATFORM_ADMIN)) {
-        navigate("/platform", { replace: true });
+      // Determine default role landing page (Section 10d)
+      const isPlat = roles.includes(ROLES.PLATFORM_ADMIN);
+      let defaultTarget = "/dashboard";
+      if (isPlat) {
+        defaultTarget = "/platform";
       } else if (roles.length === 1 && roles.includes(ROLES.GATE_STAFF)) {
-        navigate("/scanner", { replace: true });
+        defaultTarget = "/scanner";
       } else if (roles.length === 1 && roles.includes(ROLES.VOLUNTEER)) {
-        navigate("/my-tasks", { replace: true });
+        defaultTarget = "/my-tasks";
+      }
+
+      // If user had an intended destination, ensure it matches their role clearance
+      if (destination && destination !== "/login" && destination !== "/") {
+        if (destination.startsWith("/platform") && !isPlat) {
+          // Never send non-platform users (like ORG_ADMIN) into /platform
+          navigate(defaultTarget, { replace: true });
+        } else if (destination.startsWith("/app") && isPlat) {
+          // Never send platform admins without tenant context into /app
+          navigate(defaultTarget, { replace: true });
+        } else {
+          navigate(destination, { replace: true });
+        }
       } else {
-        // Org Admin, Treasurer, Event Manager, Member, Guest -> /dashboard
-        navigate("/dashboard", { replace: true });
+        navigate(defaultTarget, { replace: true });
       }
     } catch (err) {
       setError(err.message || "Failed to log in. Please check credentials.");

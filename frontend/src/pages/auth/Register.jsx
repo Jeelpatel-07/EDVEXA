@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { authApi } from "../../api";
-import { User, Mail, Lock, IdCard, Building2, ArrowRight, CheckCircle2, AlertCircle, Check, X } from "lucide-react";
+import { User, Mail, Lock, IdCard, Building2, ArrowRight, CheckCircle2, AlertCircle, Check, X, Shield } from "lucide-react";
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -11,6 +11,7 @@ export default function Register() {
     confirmPassword: "",
     studentId: "",
     joinCode: "",
+    role: "GUEST",
   });
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -33,6 +34,10 @@ export default function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (formData.studentId.trim() && !formData.joinCode.trim()) {
+      setError("Add an organization join code when supplying a student ID.");
+      return;
+    }
     if (!passwordsMatch) {
       setError("Passwords do not match.");
       return;
@@ -46,13 +51,13 @@ export default function Register() {
     setError(null);
 
     try {
-      // Strictly pass normal fields only - no role field (R4)
       await authApi.register({
         name: formData.name,
         email: formData.email,
         password: formData.password,
         studentId: formData.studentId ? formData.studentId.trim() : undefined,
         joinCode: formData.joinCode ? formData.joinCode.trim() : undefined,
+        role: formData.role,
       });
       setSuccess(true);
     } catch (err) {
@@ -70,17 +75,17 @@ export default function Register() {
             <CheckCircle2 className="w-6 h-6" />
           </div>
           <h2 className="text-xl font-bold text-foreground">
-            Account Created Successfully!
+            Account Registered!
           </h2>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            We have generated a verification email for <strong>{formData.email}</strong>. Please check your inbox (or backend server logs in development console mode) to verify your student email.
+            Your account has been registered as <strong>{formData.role}</strong> ({formData.email}). You can now sign in immediately.
           </p>
           <div className="pt-4">
             <Link
               to="/login"
               className="w-full inline-flex items-center justify-center py-2.5 px-4 rounded-xl bg-teal-600 text-white text-xs font-bold hover:bg-teal-700 shadow-xs"
             >
-              Go to Sign In
+              Proceed to Sign In
             </Link>
           </div>
         </div>
@@ -93,10 +98,10 @@ export default function Register() {
       <div className="w-full max-w-md bg-card rounded-2xl border border-border p-6 sm:p-8 shadow-sm">
         <div className="text-center mb-6">
           <h1 className="text-2xl font-bold text-foreground tracking-tight">
-            Register as Student
+            Register on EDVEXA
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
-            Create an EDVEXA student account to access events, store, and memberships
+            Choose your role to access governance, activities, ticketing, and member benefits
           </p>
         </div>
 
@@ -107,12 +112,35 @@ export default function Register() {
           </div>
         )}
 
-        {/* Note per Section 10b */}
-        <div className="mb-4 p-3 rounded-xl bg-teal-50/70 border border-teal-200 text-xs text-teal-800">
-          <strong>Note:</strong> Club officers are added by your organization admin.
+        {/* Security Policy Notice */}
+        <div className="mb-4 p-3 rounded-xl bg-teal-50/70 border border-teal-200 text-xs text-teal-800 flex items-start gap-2">
+          <Shield className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
+          <span>
+            <strong>Security Notice:</strong> Platform Administrator and Organization Administrator roles are protected and cannot be self-registered.
+          </span>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3.5">
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">
+              Select Account Role
+            </label>
+            <div className="relative">
+              <select
+                value={formData.role}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                className="w-full px-3 py-2.5 text-xs bg-card border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-600/30 focus:border-teal-600 font-medium text-foreground"
+              >
+                <option value="GUEST">Student (Guest) — Standard campus & store access</option>
+                <option value="MEMBER">Student Member — Unlocked member pass & discounts</option>
+                <option value="VOLUNTEER">Volunteer — Assigned tasks & expense claims</option>
+                <option value="GATE_STAFF">Gate Staff — Door check-in & ticket scanner</option>
+                <option value="EVENT_MANAGER">Event Manager — Events, ticket tiers & fundraisers</option>
+                <option value="TREASURER">Treasurer — Full treasury, ledger & claim approvals</option>
+              </select>
+            </div>
+          </div>
+
           <div>
             <label className="text-xs font-semibold text-slate-700 block mb-1">
               Full Name
@@ -250,7 +278,7 @@ export default function Register() {
             disabled={loading || !passwordsMatch || !allRulesMet}
             className="w-full mt-2 py-2.5 px-4 rounded-xl bg-teal-600 text-white text-xs font-bold hover:bg-teal-700 disabled:opacity-50 transition-colors shadow-xs flex items-center justify-center gap-1.5"
           >
-            <span>{loading ? "Registering..." : "Create Student Account"}</span>
+            <span>{loading ? "Registering..." : `Create Account as ${formData.role}`}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>

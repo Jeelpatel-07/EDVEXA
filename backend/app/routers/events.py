@@ -135,7 +135,7 @@ def get_event(event_id: str, org_ctx: OrgContext = Depends(get_current_org_conte
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found.")
 
     ticket_types = db.execute(
-        text("SELECT * FROM ticket_types WHERE event_id = :eid AND organization_id = :oid"),
+        text("SELECT * FROM ticket_types WHERE event_id = :eid AND organization_id = :oid ORDER BY member_price ASC"),
         {"eid": event_id, "oid": org_ctx.org_id}
     ).mappings().all()
 

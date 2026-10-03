@@ -8,8 +8,9 @@ class ExpenseClaimCreate(BaseModel):
     amount: float = Field(..., gt=0.0)
 
 class ExpenseReviewRequest(BaseModel):
-    action: str # APPROVE, REJECT
+    action: Optional[str] = "REJECT" # APPROVE, REJECT
     reject_reason: Optional[str] = None
+    reason: Optional[str] = None
 
 class ManualLedgerEntryRequest(BaseModel):
     category_id: str
