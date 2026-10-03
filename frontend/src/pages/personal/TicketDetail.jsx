@@ -62,7 +62,7 @@ export default function TicketDetail() {
         <div className="bg-teal-700 text-white p-6 sm:p-8 relative">
           <div className="flex items-center justify-between">
             <span className="text-xs uppercase tracking-widest font-extrabold text-teal-200">
-              Collegiate Student Council Pass
+              EDVEXA Official Pass
             </span>
             <span className="bg-white/20 backdrop-blur-xs text-white text-xs px-2.5 py-0.5 rounded-full font-mono">
               {ticket.ticketNumber}

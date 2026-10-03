@@ -1,75 +1,49 @@
-import apiClient from "./client";
-import { MOCK_MEMBERSHIP_PLANS, MOCK_USERS } from "./mockData";
+import apiClient, { getCurrentOrgId } from "./axios";
 
 export const membershipApi = {
   getPlans: async () => {
-    try {
-      return await apiClient.get("/membership/plans");
-    } catch {
-      return MOCK_MEMBERSHIP_PLANS;
-    }
+    return await apiClient.get(`/orgs/${getCurrentOrgId()}/memberships/plans`);
   },
 
   getCurrentMembership: async () => {
-    try {
-      return await apiClient.get("/membership/current");
-    } catch {
-      return MOCK_USERS[0].membership;
-    }
+    return await apiClient.get(`/orgs/${getCurrentOrgId()}/memberships/me`);
   },
 
   joinPlan: async (planId) => {
-    try {
-      return await apiClient.post("/membership/join", { planId });
-    } catch {
-      const plan = MOCK_MEMBERSHIP_PLANS.find((p) => p.id === planId) || MOCK_MEMBERSHIP_PLANS[1];
-      return {
-        orderId: "ord_mem_" + Date.now(),
-        planId,
-        amount: plan.price,
-        status: "PENDING_PAYMENT",
-        message: "Order created for membership purchase. Please proceed to payment."
-      };
-    }
+    // Create an order for membership purchase
+    return await apiClient.post(`/orgs/${getCurrentOrgId()}/orders`, {
+      order_type: "MEMBERSHIP",
+      items: [{ plan_id: planId, quantity: 1 }],
+    });
   },
 
   renewMembership: async (membershipId) => {
-    try {
-      return await apiClient.post(`/membership/${membershipId}/renew`);
-    } catch {
-      return {
-        orderId: "ord_renew_" + Date.now(),
-        membershipId,
-        amount: 35.00,
-        status: "PENDING_PAYMENT"
-      };
+    // Renewal uses current membership's plan
+    const current = await apiClient.get(`/orgs/${getCurrentOrgId()}/memberships/me`);
+    if (!current?.plan_id) {
+      throw new Error("No active or expiring membership found to renew.");
     }
+    return await apiClient.post(`/orgs/${getCurrentOrgId()}/orders`, {
+      order_type: "MEMBERSHIP",
+      items: [{ plan_id: current.plan_id, quantity: 1 }],
+    });
   },
 
-  // Staff endpoints
   getMembersList: async (params = {}) => {
-    try {
-      return await apiClient.get("/membership/members", { params });
-    } catch {
-      return MOCK_USERS;
-    }
+    return await apiClient.get(`/orgs/${getCurrentOrgId()}/memberships/members`, { params });
   },
 
-  getMemberDetails: async (userId) => {
-    try {
-      return await apiClient.get(`/membership/members/${userId}`);
-    } catch {
-      return MOCK_USERS.find((u) => u.id === userId) || MOCK_USERS[0];
-    }
+  verifyMemberQr: async (qrToken) => {
+    return await apiClient.get(`/orgs/${getCurrentOrgId()}/memberships/verify/${encodeURIComponent(qrToken)}`);
   },
 
-  updateMemberStatus: async (userId, status) => {
-    try {
-      return await apiClient.patch(`/membership/members/${userId}/status`, { status });
-    } catch {
-      return { success: true, userId, status };
-    }
-  }
+  createPlan: async (planData) => {
+    return await apiClient.post(`/orgs/${getCurrentOrgId()}/memberships/plans`, planData);
+  },
+
+  manualCashMembership: async (data) => {
+    return await apiClient.post(`/orgs/${getCurrentOrgId()}/memberships/manual`, data);
+  },
 };
 
 export default membershipApi;

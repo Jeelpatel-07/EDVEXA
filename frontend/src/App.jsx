@@ -96,7 +96,7 @@ function PublicLayout() {
             </span>
           </div>
           <div>
-            Collegiate Student Council • All Rights Reserved © 2026
+            © 2026 EDVEXA • Unified Student Organization Platform
           </div>
         </div>
       </footer>
@@ -123,6 +123,11 @@ export default function App() {
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
             </Route>
+
+            {/* Top-Level Role Navigation Aliases (Section 10d) */}
+            <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />
+            <Route path="/scanner" element={<Navigate to="/app/manage/check-in" replace />} />
+            <Route path="/my-tasks" element={<Navigate to="/app/tasks" replace />} />
 
             {/* PLATFORM ADMIN WORKSPACE (Section 11 & 30) */}
             <Route

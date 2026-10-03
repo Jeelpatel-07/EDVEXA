@@ -1,85 +1,63 @@
-import apiClient from "./client";
-import { MOCK_CLAIMS, MOCK_FINANCE } from "./mockData";
+import apiClient, { getCurrentOrgId } from "./axios";
 
 export const claimApi = {
   getMyClaims: async () => {
-    try {
-      return await apiClient.get("/claims/my");
-    } catch {
-      return MOCK_CLAIMS;
-    }
+    return await apiClient.get(`/orgs/${getCurrentOrgId()}/finance/claims/mine`);
+  },
+
+  getAllClaims: async (params = {}) => {
+    return await apiClient.get(`/orgs/${getCurrentOrgId()}/finance/claims`, { params });
   },
 
   getClaimById: async (id) => {
-    try {
-      return await apiClient.get(`/claims/${id}`);
-    } catch {
-      return MOCK_CLAIMS.find((c) => c.id === id || c.claimNumber === id) || MOCK_CLAIMS[0];
-    }
+    const list = await claimApi.getAllClaims();
+    return list.find((c) => c.id === id) || null;
   },
 
   submitClaim: async (claimData) => {
-    try {
-      return await apiClient.post("/claims", claimData);
-    } catch {
-      const newClaim = {
-        id: "clm_" + Date.now(),
-        claimNumber: "CLM-2026-0" + Math.floor(100 + Math.random() * 900),
-        claimantId: "usr_1",
-        claimantName: "Alex Rivera",
-        purpose: claimData.purpose,
-        category: claimData.category,
-        amount: parseFloat(claimData.amount),
-        status: "UNDER_REVIEW",
-        receiptUrl: claimData.receiptUrl || "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=500&auto=format&fit=crop&q=80",
-        submittedAt: new Date().toISOString(),
-        reviewedAt: null,
-        reviewedBy: null,
-        treasurerNotes: ""
-      };
-      MOCK_CLAIMS.unshift(newClaim);
-      return newClaim;
+    const formData = new FormData();
+    formData.append("title", claimData.title || claimData.purpose || "Expense Claim");
+    formData.append("description", claimData.description || claimData.notes || "");
+    formData.append("amount", claimData.amount);
+    if (claimData.category_id) {
+      formData.append("category_id", claimData.category_id);
     }
+    if (claimData.receipt) {
+      formData.append("receipt", claimData.receipt);
+    }
+
+    return await apiClient.post(`/orgs/${getCurrentOrgId()}/finance/claims`, formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
   },
 
-  // Treasurer / Staff endpoints
-  getAllClaims: async (params = {}) => {
-    try {
-      return await apiClient.get("/claims", { params });
-    } catch {
-      return MOCK_CLAIMS;
-    }
+  approveClaim: async (claimId) => {
+    return await apiClient.post(`/orgs/${getCurrentOrgId()}/finance/claims/${claimId}/approve`);
   },
 
-  reviewClaim: async (claimId, { status, notes, approvedAmount }) => {
-    try {
-      return await apiClient.patch(`/claims/${claimId}/review`, { status, notes, approvedAmount });
-    } catch {
-      const claim = MOCK_CLAIMS.find((c) => c.id === claimId);
-      if (claim) {
-        claim.status = status; // APPROVED, REJECTED, REIMBURSED
-        claim.treasurerNotes = notes;
-        claim.reviewedAt = new Date().toISOString();
-        claim.reviewedBy = "Treasurer Council (You)";
+  rejectClaim: async (claimId, reason) => {
+    return await apiClient.post(`/orgs/${getCurrentOrgId()}/finance/claims/${claimId}/reject`, {
+      reason: reason || "Rejected by treasurer",
+    });
+  },
 
-        if (status === "REIMBURSED") {
-          // Linked to finance!
-          MOCK_FINANCE.reimbursements += claim.amount;
-          MOCK_FINANCE.closingCash -= claim.amount;
-          MOCK_FINANCE.ledger.unshift({
-            id: "led_" + Date.now(),
-            date: new Date().toISOString().split("T")[0],
-            type: "EXPENSE",
-            source: "Reimbursement",
-            description: `${claim.claimantName} - ${claim.claimNumber} ${claim.purpose}`,
-            amount: -claim.amount,
-            ref: claim.claimNumber
-          });
-        }
-      }
-      return { success: true, claimId, status, notes };
+  reimburseClaim: async (claimId, paymentRef = "ONLINE_BANK_TRANSFER") => {
+    return await apiClient.post(`/orgs/${getCurrentOrgId()}/finance/claims/${claimId}/reimburse`, {
+      payment_ref: paymentRef,
+    });
+  },
+
+  reviewClaim: async (claimId, { status, notes }) => {
+    if (status === "APPROVED") {
+      return await claimApi.approveClaim(claimId);
+    } else if (status === "REJECTED") {
+      return await claimApi.rejectClaim(claimId, notes);
+    } else if (status === "REIMBURSED") {
+      return await claimApi.reimburseClaim(claimId, notes);
     }
-  }
+  },
 };
 
 export default claimApi;

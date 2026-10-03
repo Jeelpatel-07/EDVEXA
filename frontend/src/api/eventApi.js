@@ -1,54 +1,54 @@
-import apiClient from "./client";
-import { MOCK_EVENTS } from "./mockData";
+import apiClient, { getCurrentOrgId } from "./axios";
 
 export const eventApi = {
   getEvents: async (params = {}) => {
     try {
-      return await apiClient.get("/events", { params });
-    } catch {
-      return MOCK_EVENTS;
+      return await apiClient.get(`/orgs/${getCurrentOrgId()}/events`, { params });
+    } catch (err) {
+      // Fallback to public events if unauthenticated
+      return await apiClient.get("/public/o/edvexa/events");
     }
   },
 
   getEventById: async (eventId) => {
     try {
-      return await apiClient.get(`/events/${eventId}`);
-    } catch {
-      return MOCK_EVENTS.find((e) => e.id === eventId || e.slug === eventId) || MOCK_EVENTS[0];
+      return await apiClient.get(`/orgs/${getCurrentOrgId()}/events/${eventId}`);
+    } catch (err) {
+      return await apiClient.get(`/public/o/edvexa/events/${eventId}`);
     }
   },
 
-  // Staff endpoints
   createEvent: async (eventData) => {
-    try {
-      return await apiClient.post("/events", eventData);
-    } catch {
-      const newEvent = {
-        ...eventData,
-        id: "evt_" + Date.now(),
-        registeredCount: 0,
-        status: "UPCOMING"
-      };
-      MOCK_EVENTS.unshift(newEvent);
-      return newEvent;
-    }
+    return await apiClient.post(`/orgs/${getCurrentOrgId()}/events`, eventData);
   },
 
   updateEvent: async (eventId, eventData) => {
-    try {
-      return await apiClient.put(`/events/${eventId}`, eventData);
-    } catch {
-      return { id: eventId, ...eventData };
-    }
+    return await apiClient.patch(`/orgs/${getCurrentOrgId()}/events/${eventId}`, eventData);
   },
 
-  deleteEvent: async (eventId) => {
-    try {
-      return await apiClient.delete(`/events/${eventId}`);
-    } catch {
-      return { success: true, eventId };
-    }
-  }
+  publishEvent: async (eventId) => {
+    return await apiClient.post(`/orgs/${getCurrentOrgId()}/events/${eventId}/publish`);
+  },
+
+  cancelEvent: async (eventId) => {
+    return await apiClient.post(`/orgs/${getCurrentOrgId()}/events/${eventId}/cancel`);
+  },
+
+  getEventReport: async (eventId) => {
+    return await apiClient.get(`/orgs/${getCurrentOrgId()}/events/${eventId}/report`);
+  },
+
+  createTicketType: async (eventId, data) => {
+    return await apiClient.post(`/orgs/${getCurrentOrgId()}/events/${eventId}/ticket-types`, data);
+  },
+
+  getPublicEvents: async (slug = "edvexa") => {
+    return await apiClient.get(`/public/o/${slug}/events`);
+  },
+
+  getPublicEventDetail: async (slug = "edvexa", eventId) => {
+    return await apiClient.get(`/public/o/${slug}/events/${eventId}`);
+  },
 };
 
 export default eventApi;

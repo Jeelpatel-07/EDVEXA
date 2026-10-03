@@ -1,33 +1,21 @@
-import apiClient from "./client";
-import { MOCK_NOTIFICATIONS } from "./mockData";
+import apiClient, { getCurrentOrgId } from "./axios";
 
 export const notificationApi = {
   getNotifications: async () => {
-    try {
-      return await apiClient.get("/notifications");
-    } catch {
-      return MOCK_NOTIFICATIONS;
-    }
+    return await apiClient.get(`/orgs/${getCurrentOrgId()}/notifications/me`);
   },
 
   markAsRead: async (id) => {
-    try {
-      return await apiClient.patch(`/notifications/${id}/read`);
-    } catch {
-      const item = MOCK_NOTIFICATIONS.find((n) => n.id === id);
-      if (item) item.read = true;
-      return { success: true, id };
-    }
+    return await apiClient.patch(`/orgs/${getCurrentOrgId()}/notifications/${id}/read`);
   },
 
   markAllAsRead: async () => {
-    try {
-      return await apiClient.post("/notifications/read-all");
-    } catch {
-      MOCK_NOTIFICATIONS.forEach((n) => (n.read = true));
-      return { success: true };
-    }
-  }
+    const list = await notificationApi.getNotifications();
+    await Promise.all(
+      list.filter((n) => n.status !== "READ").map((n) => notificationApi.markAsRead(n.id))
+    );
+    return { success: true };
+  },
 };
 
 export default notificationApi;

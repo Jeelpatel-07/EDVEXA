@@ -158,9 +158,27 @@ export default function Sidebar({ onCloseMobile }) {
     },
   ];
 
-  const currentItems = isStaffRoute
+  const isPureGateStaff = roles.length === 1 && roles.includes(ROLES.GATE_STAFF);
+  const isPureVolunteer = roles.length === 1 && roles.includes(ROLES.VOLUNTEER);
+
+  let currentItems = isStaffRoute
     ? staffConfig.filter((i) => i.allowed)
     : personalItems;
+
+  if (isPureGateStaff) {
+    currentItems = [
+      { label: "Gate Scanner", to: "/app/manage/check-in", icon: QrCode },
+      { label: "Profile", to: "/app/profile", icon: User },
+    ];
+  } else if (isPureVolunteer) {
+    currentItems = [
+      { label: "My Tasks", to: "/app/tasks", icon: CheckSquare },
+      { label: "My Expenses", to: "/app/claims", icon: FileSpreadsheet },
+      { label: "Profile", to: "/app/profile", icon: User },
+    ];
+  }
+
+  const showStaffSwitcher = hasStaffAccess && !isPureGateStaff && !isPureVolunteer;
 
   return (
     <aside className="w-64 bg-card border-r border-border flex flex-col h-full select-none">
@@ -202,7 +220,7 @@ export default function Sidebar({ onCloseMobile }) {
       )}
 
       {/* Workspace Switcher Pill (Personal vs Staff) */}
-      {hasStaffAccess && (
+      {showStaffSwitcher && (
         <div className="p-3 border-b border-border bg-slate-50/60">
           <div className="grid grid-cols-2 p-1 bg-slate-200/70 rounded-lg text-xs font-medium">
             <Link

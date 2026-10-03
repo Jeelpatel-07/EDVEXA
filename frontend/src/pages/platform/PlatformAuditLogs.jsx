@@ -1,129 +1,121 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import PageHeader from "../../components/common/PageHeader";
 import DataTable from "../../components/common/DataTable";
-import { ShieldCheck, Search, Filter } from "lucide-react";
+import { platformApi } from "../../api";
+import { ShieldCheck, Search } from "lucide-react";
 
 export default function PlatformAuditLogs() {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
-  const logs = [
-    {
-      id: "log_01",
-      timestamp: "2026-10-03 13:42:15",
-      eventType: "ORGANIZATION_STATUS_UPDATE",
-      actor: "platform.admin@edvexa.com",
-      target: "org-arts (Fine Arts & Media Guild)",
-      details: "Tenant status modified to SUSPENDED. Enforcement: blocked route access.",
-      severity: "WARNING",
-    },
-    {
-      id: "log_02",
-      timestamp: "2026-10-03 11:20:04",
-      eventType: "PLATFORM_ADMIN_LOGIN",
-      actor: "platform.admin@edvexa.com",
-      target: "AUTH_GATEWAY",
-      details: "Two-factor authenticated session verified for Master Node actor.",
-      severity: "INFO",
-    },
-    {
-      id: "log_03",
-      timestamp: "2026-10-02 18:30:00",
-      eventType: "TENANT_PROVISIONED",
-      actor: "platform.admin@edvexa.com",
-      target: "org-tech (Engineering Student Council)",
-      details: "New tenant workspace initialized with schema isolation.",
-      severity: "INFO",
-    },
-    {
-      id: "log_04",
-      timestamp: "2026-10-01 09:15:22",
-      eventType: "CROSS_TENANT_BLOCK",
-      actor: "usr_2 (Priya Sharma)",
-      target: "org-skyline / org-tech",
-      details: "Rejected cross-tenant data access attempt by resource organization ID check.",
-      severity: "SECURITY_INTERCEPT",
-    },
-  ];
+  const loadLogs = async () => {
+    setLoading(true);
+    try {
+      const data = await platformApi.getAuditLogs();
+      setLogs(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Failed to load platform audit logs:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLogs();
+  }, []);
+
+  const filteredLogs = logs.filter((l) => {
+    const q = search.toLowerCase();
+    return (
+      (l.action || "").toLowerCase().includes(q) ||
+      (l.entity_type || "").toLowerCase().includes(q) ||
+      (l.actor_email || "").toLowerCase().includes(q)
+    );
+  });
 
   const columns = [
     {
       header: "Timestamp",
-      accessor: "timestamp",
-      render: (row) => <span className="font-mono text-xs text-muted-foreground">{row.timestamp}</span>,
+      accessor: "created_at",
+      render: (row) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {new Date(row.created_at).toLocaleString()}
+        </span>
+      ),
     },
     {
-      header: "Event Type",
-      accessor: "eventType",
+      header: "Action",
+      accessor: "action",
       render: (row) => (
         <span className="font-mono text-xs font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
-          {row.eventType}
+          {row.action}
         </span>
       ),
     },
     {
       header: "Actor",
-      accessor: "actor",
-      render: (row) => <span className="font-semibold text-xs text-foreground">{row.actor}</span>,
-    },
-    {
-      header: "Target Resource",
-      accessor: "target",
-      render: (row) => <span className="text-xs text-slate-700">{row.target}</span>,
-    },
-    {
-      header: "Audit Details",
-      accessor: "details",
-      render: (row) => <span className="text-xs text-muted-foreground">{row.details}</span>,
-    },
-    {
-      header: "Severity",
-      accessor: "severity",
+      accessor: "actor_email",
       render: (row) => (
-        <span
-          className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-            row.severity === "SECURITY_INTERCEPT"
-              ? "bg-rose-50 text-rose-700 border-rose-200"
-              : row.severity === "WARNING"
-              ? "bg-amber-50 text-amber-700 border-amber-200"
-              : "bg-blue-50 text-blue-700 border-blue-200"
-          }`}
-        >
-          {row.severity}
+        <span className="text-xs font-semibold text-slate-800">
+          {row.actor_email || "System"}
+        </span>
+      ),
+    },
+    {
+      header: "Target Entity",
+      accessor: "entity_type",
+      render: (row) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {row.entity_type} {row.entity_id ? `(${row.entity_id.slice(0, 8)}...)` : ""}
+        </span>
+      ),
+    },
+    {
+      header: "Details",
+      accessor: "details",
+      render: (row) => (
+        <span className="text-xs text-foreground">
+          {typeof row.details === "object" ? JSON.stringify(row.details) : String(row.details || "")}
         </span>
       ),
     },
   ];
 
-  const filteredLogs = logs.filter(
-    (l) =>
-      l.eventType.toLowerCase().includes(search.toLowerCase()) ||
-      l.actor.toLowerCase().includes(search.toLowerCase()) ||
-      l.details.toLowerCase().includes(search.toLowerCase())
-  );
-
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Platform Security & Audit Logs"
-        description="Immutable system-level audit records capturing cross-tenant queries, organization status modifications, and master actor events."
+        title="Platform Audit Trail"
+        description="Immutable record of platform-level events, organization state transitions, and administrative operations."
       />
 
-      <div className="bg-card rounded-2xl border border-border p-4 shadow-xs">
-        <div className="relative max-w-md">
+      {/* Notice */}
+      <div className="p-4 rounded-2xl bg-slate-100 border border-slate-200 text-xs text-slate-700 flex items-center gap-3">
+        <ShieldCheck className="w-5 h-5 text-purple-600 shrink-0" />
+        <span>
+          <strong>Append-Only Security:</strong> Audit logs are strictly immutable and protected by PostgreSQL triggers. Modification and deletion of audit records is permanently denied.
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between gap-4">
+        <div className="relative w-full sm:w-72">
           <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search platform audit logs..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-600/30"
+            placeholder="Search audit trail..."
+            className="w-full pl-9 pr-3 py-1.5 text-xs bg-card border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-600/30 focus:border-purple-600"
           />
         </div>
       </div>
 
-      <div className="bg-card rounded-2xl border border-border overflow-hidden shadow-xs">
-        <DataTable columns={columns} data={filteredLogs} emptyMessage="No audit logs recorded." />
-      </div>
+      <DataTable
+        columns={columns}
+        data={filteredLogs}
+        loading={loading}
+        emptyMessage="No audit log events found matching query."
+      />
     </div>
   );
 }

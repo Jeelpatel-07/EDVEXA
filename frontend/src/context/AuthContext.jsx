@@ -1,11 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import authApi from "../api/authApi";
-import {
-  ROLES,
-  PERMISSIONS,
-  computePermissionsForRoles,
-  isMembershipActive,
-} from "../constants/permissions";
+import { ROLES } from "../constants/permissions";
 
 const AuthContext = createContext(null);
 
@@ -16,8 +11,8 @@ export function AuthProvider({ children }) {
     roles: [],
     permissions: [],
     membership: null,
-    personaKey: null,
-    personaTitle: null,
+    persona_label: "GUEST",
+    is_member: false,
   });
   const [loading, setLoading] = useState(true);
 
@@ -30,18 +25,14 @@ export function AuthProvider({ children }) {
         roles: [],
         permissions: [],
         membership: null,
-        personaKey: null,
-        personaTitle: null,
+        persona_label: "GUEST",
+        is_member: false,
       });
       return;
     }
 
     const roles = Array.isArray(data.roles) ? data.roles : [];
-    // Ensure permissions are the authoritative union of permissions
-    const permissions =
-      Array.isArray(data.permissions) && data.permissions.length > 0
-        ? Array.from(new Set([...data.permissions, ...computePermissionsForRoles(roles)]))
-        : computePermissionsForRoles(roles);
+    const permissions = Array.isArray(data.permissions) ? data.permissions : [];
 
     setSession({
       user: data.user,
@@ -49,19 +40,18 @@ export function AuthProvider({ children }) {
       roles,
       permissions,
       membership: data.membership || null,
-      personaKey: data.personaKey || null,
-      personaTitle: data.personaTitle || null,
+      persona_label: data.persona_label || (data.is_member ? "MEMBER" : "GUEST"),
+      is_member: Boolean(data.is_member),
     });
   }, []);
 
-  // Initialize auth state from storage or default demo
+  // Initialize auth state from live backend session
   const refreshSession = useCallback(async () => {
     try {
       const data = await authApi.getCurrentUser();
       applySession(data);
       return data;
     } catch (err) {
-      console.error("Session refresh failed:", err);
       applySession(null);
       return null;
     }
@@ -70,16 +60,9 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     async function initAuth() {
       try {
-        const token = localStorage.getItem("edvexa_token");
-        if (token) {
-          await refreshSession();
-        } else {
-          // In development demo mode, initialize with default Org Admin
-          const data = await authApi.getCurrentUser();
-          applySession(data);
-        }
+        await refreshSession();
       } catch (err) {
-        console.error("Auth initialization failed:", err);
+        console.error("Auth initialization error:", err);
       } finally {
         setLoading(false);
       }
@@ -87,7 +70,7 @@ export function AuthProvider({ children }) {
 
     initAuth();
 
-    // Listen for unauthorized 401 events from Axios client (Section 34)
+    // Listen for unauthorized 401 events from Axios client
     const handleUnauthorized = () => {
       applySession(null);
     };
@@ -96,60 +79,56 @@ export function AuthProvider({ children }) {
     return () => window.removeEventListener("edvexa:unauthorized", handleUnauthorized);
   }, [applySession, refreshSession]);
 
-  // Standard Login
+  // Standard Login (email + password only)
   const login = async (credentials) => {
     setLoading(true);
     try {
       const data = await authApi.login(credentials);
-      applySession(data);
-      return data;
+      // Fetch fresh /auth/me for live permissions and membership
+      const meData = await authApi.getCurrentUser();
+      applySession(meData);
+      return meData;
     } finally {
       setLoading(false);
     }
   };
 
-  // Demo Persona Login (Section 21 & 45: Real backend session, no local fake mutations)
-  const loginAsPersona = async (personaKey) => {
-    setLoading(true);
-    try {
-      const data = await authApi.loginAsPersona(personaKey);
-      applySession(data);
-      return data;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Switch Organization Context (Section 29)
+  // Switch Organization Context
   const switchOrganization = async (orgId) => {
     setLoading(true);
     try {
-      const data = await authApi.switchOrganization(orgId);
-      applySession(data);
-      return data;
+      await authApi.selectOrg(orgId);
+      const meData = await authApi.getCurrentUser();
+      applySession(meData);
+      return meData;
     } finally {
       setLoading(false);
     }
   };
 
-  // Logout (Section 36)
-  const logout = () => {
-    authApi.logout();
-    applySession(null);
+  // Logout
+  const logout = async () => {
+    try {
+      await authApi.logout();
+    } catch (e) {
+      console.warn("Logout error:", e);
+    } finally {
+      applySession(null);
+    }
   };
 
   // Derived authorization checks
   const isAuthenticated = !!session.user;
 
-  // Section 8: MEMBER derived strictly from active paid membership
+  // MEMBER derived strictly from backend is_member
   const isMember = useCallback(() => {
-    return isMembershipActive(session.membership);
-  }, [session.membership]);
+    return Boolean(session.is_member);
+  }, [session.is_member]);
 
-  // Section 9: GUEST is registered user without active membership
+  // GUEST is registered user without active membership
   const isGuest = useCallback(() => {
-    return isAuthenticated && !isMembershipActive(session.membership);
-  }, [isAuthenticated, session.membership]);
+    return isAuthenticated && !session.is_member;
+  }, [isAuthenticated, session.is_member]);
 
   // Explicit Role Checks
   const hasRole = useCallback(
@@ -166,26 +145,29 @@ export function AuthProvider({ children }) {
     [session.roles]
   );
 
-  // Platform Admin Check (Section 11)
+  // Platform Admin Check
   const isPlatformAdmin = useCallback(() => {
     return session.roles.includes(ROLES.PLATFORM_ADMIN);
   }, [session.roles]);
 
-  // Permission Checks (Section 6 & 18: Union of permissions)
+  // Permission Checks (Union of permissions loaded live from DB)
   const hasPermission = useCallback(
     (permission) => {
       if (!permission) return true;
+      // Org admin has broad authority
+      if (session.roles.includes(ROLES.ORG_ADMIN)) return true;
       return session.permissions.includes(permission);
     },
-    [session.permissions]
+    [session.permissions, session.roles]
   );
 
   const hasAnyPermission = useCallback(
     (permissionList = []) => {
       if (!permissionList || permissionList.length === 0) return true;
+      if (session.roles.includes(ROLES.ORG_ADMIN)) return true;
       return permissionList.some((p) => session.permissions.includes(p));
     },
-    [session.permissions]
+    [session.permissions, session.roles]
   );
 
   // Staff access: true if user holds ANY explicit organization staff role
@@ -208,13 +190,12 @@ export function AuthProvider({ children }) {
       roles: session.roles,
       permissions: session.permissions,
       membership: session.membership,
-      personaKey: session.personaKey,
-      personaTitle: session.personaTitle,
+      persona_label: session.persona_label,
+      is_member: session.is_member,
       isAuthenticated,
       isLoading: loading,
-      loading, // backwards compatibility
+      loading,
       login,
-      loginAsPersona,
       switchOrganization,
       logout,
       refreshSession,

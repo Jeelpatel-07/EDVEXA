@@ -53,7 +53,7 @@ export default function Profile() {
                 {user?.department}
               </span>
               <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded border border-slate-200">
-                {organization?.name || "Skyline Student Association"}
+                {organization?.name || "EDVEXA Student Association"}
               </span>
               {isMember() ? (
                 <StatusBadge status={membership?.status || "ACTIVE"} />

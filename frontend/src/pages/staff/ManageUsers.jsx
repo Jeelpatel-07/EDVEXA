@@ -215,7 +215,7 @@ export default function ManageUsers() {
                 </p>
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-600 mt-1 font-medium">
                   <Building2 className="w-3.5 h-3.5 text-teal-600" />
-                  <span>{organization?.name || "Skyline Student Association"}</span>
+                  <span>{organization?.name || "EDVEXA Student Association"}</span>
                 </div>
               </div>
               <Shield className="w-6 h-6 text-teal-600" />

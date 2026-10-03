@@ -12,3 +12,4 @@ export { default as taskApi } from "./taskApi";
 export { default as claimApi } from "./claimApi";
 export { default as financeApi } from "./financeApi";
 export { default as userApi } from "./userApi";
+export { default as platformApi } from "./platformApi";
