@@ -90,9 +90,7 @@ function PublicLayout() {
       <footer className="border-t border-border bg-card py-10 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
           <div className="flex items-center gap-2">
-            <span className="w-5 h-5 rounded bg-teal-600 text-white font-bold flex items-center justify-center text-[10px]">
-              E
-            </span>
+            <img src="/logo.png" alt="EDVEXA" className="w-6 h-6 rounded-md object-contain" />
             <span className="font-semibold text-foreground">
               EDVEXA — Unified Student Organization Platform
             </span>
@@ -132,6 +130,8 @@ export default function App() {
             <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />
             <Route path="/scanner" element={<Navigate to="/app/manage/check-in" replace />} />
             <Route path="/my-tasks" element={<Navigate to="/app/tasks" replace />} />
+            <Route path="/shop" element={<Navigate to="/app/shop" replace />} />
+            <Route path="/merchandise" element={<Navigate to="/app/shop" replace />} />
 
             {/* PLATFORM ADMIN WORKSPACE (Section 11 & 30) */}
             <Route
@@ -170,6 +170,9 @@ export default function App() {
               <Route path="tickets/:ticketId" element={<TicketDetail />} />
               <Route path="shop" element={<Shop />} />
               <Route path="shop/products/:productId" element={<ProductDetail />} />
+              <Route path="merchandise" element={<Shop />} />
+              <Route path="merchandise/products/:productId" element={<ProductDetail />} />
+              <Route path="merchandise/:productId" element={<ProductDetail />} />
               <Route path="cart" element={<Cart />} />
               <Route path="checkout/:orderId" element={<Checkout />} />
               <Route path="orders" element={<Orders />} />
@@ -227,6 +230,14 @@ export default function App() {
                 element={
                   <PermissionGuard permission={PERMISSIONS.EVENTS_CREATE}>
                     <NewEvent />
+                  </PermissionGuard>
+                }
+              />
+              <Route
+                path="manage/events/:eventId"
+                element={
+                  <PermissionGuard permission={PERMISSIONS.EVENTS_MANAGE}>
+                    <EventDetail />
                   </PermissionGuard>
                 }
               />

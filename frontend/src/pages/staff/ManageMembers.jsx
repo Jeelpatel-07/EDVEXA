@@ -19,17 +19,17 @@ export default function ManageMembers() {
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = members.filter(
+  const filtered = (members || []).filter(
     (m) =>
-      m.name.toLowerCase().includes(search.toLowerCase()) ||
-      m.email.toLowerCase().includes(search.toLowerCase()) ||
-      m.studentId.toLowerCase().includes(search.toLowerCase())
+      (m.full_name || m.name || "").toLowerCase().includes(search.toLowerCase()) ||
+      (m.email || "").toLowerCase().includes(search.toLowerCase()) ||
+      (m.member_number || m.student_id || m.studentId || "").toLowerCase().includes(search.toLowerCase())
   );
 
   const columns = [
     {
       header: "Student",
-      accessor: "name",
+      accessor: "full_name",
       render: (row) => (
         <div className="flex items-center gap-2.5">
           <img
@@ -37,11 +37,11 @@ export default function ManageMembers() {
               row.avatar ||
               "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"
             }
-            alt={row.name}
+            alt={row.full_name || row.name || "Student"}
             className="w-8 h-8 rounded-full object-cover border border-border"
           />
           <div>
-            <div className="font-semibold text-foreground text-xs">{row.name}</div>
+            <div className="font-semibold text-foreground text-xs">{row.full_name || row.name}</div>
             <div className="text-[11px] text-muted-foreground">{row.email}</div>
           </div>
         </div>
@@ -49,10 +49,10 @@ export default function ManageMembers() {
     },
     {
       header: "Student ID",
-      accessor: "studentId",
+      accessor: "member_number",
       render: (row) => (
         <span className="font-mono text-xs text-muted-foreground">
-          {row.studentId}
+          {row.member_number || row.student_id || row.studentId || "N/A"}
         </span>
       ),
     },

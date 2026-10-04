@@ -82,12 +82,15 @@ export default function Home() {
             <div className="lg:col-span-5">
               <div className="bg-card rounded-2xl border border-border p-6 shadow-lg relative">
                 <div className="flex items-center justify-between pb-4 border-b border-border">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-rose-400" />
-                    <div className="w-3 h-3 rounded-full bg-amber-400" />
-                    <div className="w-3 h-3 rounded-full bg-emerald-400" />
+                  <div className="flex items-center gap-2.5">
+                    <img src="/logo.png" alt="EDVEXA" className="w-6 h-6 rounded-md object-contain" />
+                    <span className="text-xs font-bold text-foreground">EDVEXA Live Campus Hub</span>
                   </div>
-                  <span className="text-xs font-mono text-muted-foreground">EDVEXA Hub</span>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2.5 h-2.5 rounded-full bg-rose-400" />
+                    <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                  </div>
                 </div>
 
                 <div className="mt-4 space-y-3">
@@ -102,7 +105,7 @@ export default function Home() {
                       </div>
                     </div>
                     <span className="text-xs font-bold text-teal-700 bg-white px-2.5 py-1 rounded-md border border-teal-200">
-                      Member $0.00
+                      Member ₹0.00
                     </span>
                   </div>
 

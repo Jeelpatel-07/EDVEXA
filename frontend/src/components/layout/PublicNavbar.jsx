@@ -19,9 +19,11 @@ export default function PublicNavbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand */}
         <Link to="/" className="flex items-center gap-2.5 font-bold text-lg text-foreground">
-          <div className="w-8 h-8 rounded-lg bg-teal-600 flex items-center justify-center text-white font-extrabold text-base shadow-xs">
-            E
-          </div>
+          <img
+            src="/logo.png"
+            alt="EDVEXA Logo"
+            className="w-9 h-9 rounded-xl object-contain bg-white shadow-2xs border border-border/40 p-0.5"
+          />
           <div className="flex flex-col">
             <span className="leading-tight tracking-tight text-foreground font-black text-base">
               EDVEXA

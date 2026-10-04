@@ -4,6 +4,7 @@ import { shopApi } from "../../api";
 import { Package, Plus, Boxes, ArrowRight } from "lucide-react";
 import PageHeader from "../../components/common/PageHeader";
 import LoadingState from "../../components/common/LoadingState";
+import ImageWithFallback from "../../components/common/ImageWithFallback";
 
 export default function ManageProducts() {
   const [products, setProducts] = useState([]);
@@ -54,9 +55,11 @@ export default function ManageProducts() {
                 className="bg-card rounded-2xl border border-border overflow-hidden shadow-xs hover:border-teal-300 transition-all flex flex-col justify-between"
               >
                 <div className="relative h-48 overflow-hidden bg-slate-100">
-                  <img
-                    src={p.image}
+                  <ImageWithFallback
+                    src={p.image || p.imageUrl || p.image_url}
                     alt={p.name}
+                    category={p.category}
+                    containerClassName="relative w-full h-full bg-slate-100"
                     className="w-full h-full object-cover"
                   />
                   <div className="absolute top-3 left-3">
@@ -89,10 +92,10 @@ export default function ManageProducts() {
                     </p>
                     <div className="mt-3 flex items-baseline gap-2">
                       <span className="text-sm font-extrabold text-foreground">
-                        ${p.price.toFixed(2)}
+                        ₹{Number(p.price || 0).toLocaleString("en-IN")}
                       </span>
                       <span className="text-xs font-semibold text-teal-700">
-                        (Member: ${p.memberPrice.toFixed(2)})
+                        (Member: ₹{Number(p.memberPrice || p.price || 0).toLocaleString("en-IN")})
                       </span>
                     </div>
                   </div>

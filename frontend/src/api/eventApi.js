@@ -1,20 +1,22 @@
-import apiClient, { getCurrentOrgId } from "./axios";
+import apiClient, { getCurrentOrgId, getCurrentOrgSlug } from "./axios";
 
 export const eventApi = {
-  getEvents: async (params = {}) => {
+  getEvents: async (params = {}, slug) => {
     try {
       return await apiClient.get(`/orgs/${getCurrentOrgId()}/events`, { params });
     } catch (err) {
       // Fallback to public events if unauthenticated
-      return await apiClient.get("/public/o/edvexa/events");
+      const activeSlug = slug || getCurrentOrgSlug();
+      return await apiClient.get(`/public/o/${activeSlug}/events`);
     }
   },
 
-  getEventById: async (eventId) => {
+  getEventById: async (eventId, slug) => {
     try {
       return await apiClient.get(`/orgs/${getCurrentOrgId()}/events/${eventId}`);
     } catch (err) {
-      return await apiClient.get(`/public/o/edvexa/events/${eventId}`);
+      const activeSlug = slug || getCurrentOrgSlug();
+      return await apiClient.get(`/public/o/${activeSlug}/events/${eventId}`);
     }
   },
 

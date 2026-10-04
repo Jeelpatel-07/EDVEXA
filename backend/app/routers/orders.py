@@ -16,11 +16,12 @@ def create_new_order(
     db: Session = Depends(get_db)
 ):
     try:
+        resolved_type = "MERCH" if req.order_type.upper() in ["MERCH", "MERCHANDISE"] else req.order_type.upper()
         order = create_order(
             db=db,
             user_id=str(current_user["id"]),
             org_id=org_ctx.org_id,
-            order_type=req.order_type.upper(),
+            order_type=resolved_type,
             items=[itm.model_dump() for itm in req.items]
         )
         return order

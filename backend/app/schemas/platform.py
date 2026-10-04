@@ -27,5 +27,10 @@ class OrgAdminInvite(BaseModel):
     email: EmailStr
     full_name: Optional[str] = None
 
+class PlatformAdminDirectInvite(BaseModel):
+    organization_id: str
+    email: EmailStr
+    full_name: Optional[str] = None
+
 class PlatformSettingsUpdate(BaseModel):
     settings: dict

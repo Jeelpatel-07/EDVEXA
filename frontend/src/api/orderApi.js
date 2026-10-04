@@ -15,7 +15,7 @@ export const orderApi = {
     // Format items: { variant_id, ticket_type_id, plan_id, quantity }
     const formattedItems = items.map((it) => ({
       ticket_type_id: it.ticket_type_id || it.ticketTypeId || undefined,
-      variant_id: it.variant_id || it.variantId || undefined,
+      variant_id: it.variant_id || it.variantId || it.variant?.id || undefined,
       plan_id: it.plan_id || it.planId || undefined,
       quantity: it.quantity || 1,
     }));

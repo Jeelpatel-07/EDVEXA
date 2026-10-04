@@ -62,9 +62,11 @@ export default function Login() {
       <div className="w-full max-w-md bg-card rounded-2xl border border-border p-6 sm:p-8 shadow-sm space-y-6">
         {/* Header */}
         <div className="text-center">
-          <div className="w-10 h-10 rounded-xl bg-teal-600 text-white font-extrabold text-lg flex items-center justify-center mx-auto mb-3 shadow-xs">
-            E
-          </div>
+          <img
+            src="/logo.png"
+            alt="EDVEXA Logo"
+            className="w-16 h-16 rounded-2xl object-contain mx-auto mb-3 shadow-sm bg-white border border-border/40 p-1"
+          />
           <h1 className="text-2xl font-bold text-foreground tracking-tight">
             Sign In to EDVEXA
           </h1>

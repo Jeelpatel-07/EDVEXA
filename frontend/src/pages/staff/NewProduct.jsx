@@ -121,7 +121,7 @@ export default function NewProduct() {
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-semibold text-slate-700 block mb-1">
-              Standard Retail Price ($)
+              Standard Retail Price (₹)
             </label>
             <input
               type="number"
@@ -137,7 +137,7 @@ export default function NewProduct() {
 
           <div>
             <label className="text-xs font-semibold text-teal-800 block mb-1">
-              Member Subsidized Price ($)
+              Member Subsidized Price (₹)
             </label>
             <input
               type="number"

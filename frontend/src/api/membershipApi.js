@@ -42,7 +42,7 @@ export const membershipApi = {
   },
 
   manualCashMembership: async (data) => {
-    return await apiClient.post(`/orgs/${getCurrentOrgId()}/memberships/manual`, data);
+    return await apiClient.post(`/orgs/${getCurrentOrgId()}/memberships/members/manual`, data);
   },
 };
 

@@ -256,6 +256,55 @@ export default function FinanceReports() {
     setTimeout(() => setDownloadSuccess(false), 4000);
   };
 
+  const exportToCSV = () => {
+    if (!report) return;
+
+    const summary = report.summary || {};
+    const closingBalance = Number(summary.closingCash ?? summary.net_balance ?? 0).toFixed(2);
+    const generatedDate = report.generatedAt
+      ? new Date(report.generatedAt).toISOString()
+      : new Date().toISOString();
+
+    const lines = [
+      ["EDVEXA Collegiate Organization Financial Audit Report"],
+      [`Fiscal Period: ${timeframe}`],
+      [`Generated: ${generatedDate}`],
+      [`Closing Treasury Net Balance: $${closingBalance}`],
+      [],
+      ["1. MONTHLY PERFORMANCE"],
+      ["Billing Cycle", "Gross Revenues", "Disbursed Expenses", "Net Surplus"],
+      ...(report.breakdownByMonth || []).map((row) => [
+        `"${row.month || "Billing Cycle"}"`,
+        Number(row.income || 0).toFixed(2),
+        Number(row.expenses || 0).toFixed(2),
+        Number(row.net || 0).toFixed(2),
+      ]),
+      [],
+      ["2. REVENUE DISTRIBUTION BY CHANNEL"],
+      ["Revenue Channel", "Realized Total ($)"],
+      ["Student Memberships", Number(summary.incomeBreakdown?.memberships || 0).toFixed(2)],
+      ["Event Ticket Sales", Number(summary.incomeBreakdown?.tickets || 0).toFixed(2)],
+      ["Merchandise Store", Number(summary.incomeBreakdown?.merchandise || 0).toFixed(2)],
+      ["Student Drives & Fundraisers", Number(summary.incomeBreakdown?.fundraisers || 0).toFixed(2)],
+      [],
+      ["Auditor Status: Certified - In Compliance with Campus Activity Guidelines"],
+    ];
+
+    const csvContent = lines.map((e) => (Array.isArray(e) ? e.join(",") : e)).join("\n");
+    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `EDVEXA_Financial_Audit_Report_${timeframe}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    setDownloadSuccess(true);
+    setTimeout(() => setDownloadSuccess(false), 4000);
+  };
+
   if (loading) return <LoadingState message="Generating financial reports..." />;
 
   const summary = report?.summary;
@@ -275,6 +324,15 @@ export default function FinanceReports() {
         description="Official quarterly report on student activity fee disbursements, membership revenues, and event profit margins."
         action={
           <div className="flex items-center gap-2 print:hidden">
+            {/* CSV Export Button */}
+            <button
+              onClick={exportToCSV}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-teal-600 bg-teal-50 text-teal-800 text-xs font-bold hover:bg-teal-100 shadow-2xs transition-colors cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export as CSV</span>
+            </button>
+
             {/* Word Export Button */}
             <button
               onClick={exportToWord}

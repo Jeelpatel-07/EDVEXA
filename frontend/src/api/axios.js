@@ -23,6 +23,13 @@ export const getCurrentOrgId = () => {
   }
   return currentOrgId;
 };
+export const getCurrentOrgSlug = () => {
+  if (typeof window !== "undefined" && window.localStorage) {
+    const stored = localStorage.getItem("edvexa_current_org_slug") || localStorage.getItem("currentOrgSlug");
+    if (stored) return stored;
+  }
+  return "edvexa";
+};
 export const clearSession = () => {
   accessToken = null;
   currentOrgId = null;

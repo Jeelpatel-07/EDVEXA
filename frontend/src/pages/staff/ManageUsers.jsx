@@ -75,7 +75,7 @@ export default function ManageUsers() {
       }
       setShowConfirm(false);
       setSelectedUser(null);
-      alert(`Staff roles successfully updated for ${selectedUser.name}!`);
+      alert(`Staff roles successfully updated for ${selectedUser.full_name || selectedUser.name}!`);
     } catch (err) {
       alert("Failed to update staff roles: " + err.message);
     } finally {
@@ -83,11 +83,11 @@ export default function ManageUsers() {
     }
   };
 
-  const filtered = users.filter(
+  const filtered = (users || []).filter(
     (u) =>
-      u.name.toLowerCase().includes(search.toLowerCase()) ||
-      u.email.toLowerCase().includes(search.toLowerCase()) ||
-      u.studentId?.toLowerCase().includes(search.toLowerCase())
+      (u.full_name || u.name || "").toLowerCase().includes(search.toLowerCase()) ||
+      (u.email || "").toLowerCase().includes(search.toLowerCase()) ||
+      (u.student_id || u.studentId || "").toLowerCase().includes(search.toLowerCase())
   );
 
   const columns = [
@@ -100,11 +100,11 @@ export default function ManageUsers() {
               row.avatar ||
               "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"
             }
-            alt={row.name}
+            alt={row.full_name || row.name || "User"}
             className="w-8 h-8 rounded-full object-cover border border-border"
           />
           <div>
-            <div className="font-semibold text-foreground text-xs">{row.name}</div>
+            <div className="font-semibold text-foreground text-xs">{row.full_name || row.name}</div>
             <div className="text-[11px] text-muted-foreground">{row.email}</div>
           </div>
         </div>
@@ -115,7 +115,7 @@ export default function ManageUsers() {
       accessor: "studentId",
       render: (row) => (
         <span className="font-mono text-xs text-muted-foreground">
-          {row.studentId || "N/A"}
+          {row.student_id || row.studentId || "N/A"}
         </span>
       ),
     },
@@ -237,10 +237,10 @@ export default function ManageUsers() {
                   Staff Role Assignment
                 </span>
                 <h3 className="text-base font-bold text-foreground mt-0.5">
-                  {selectedUser.name}
+                  {selectedUser.full_name || selectedUser.name}
                 </h3>
                 <p className="text-xs text-muted-foreground">
-                  {selectedUser.studentId} • {selectedUser.email}
+                  {selectedUser.student_id || selectedUser.studentId || "N/A"} • {selectedUser.email}
                 </p>
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-600 mt-1 font-medium">
                   <Building2 className="w-3.5 h-3.5 text-teal-600" />
@@ -335,7 +335,7 @@ export default function ManageUsers() {
                 </div>
                 <p className="text-[11px] text-amber-800 leading-relaxed">
                   You are assigning {pendingRoles.length > 0 ? pendingRoles.join(", ") : "no staff roles"} to{" "}
-                  <strong>{selectedUser.name}</strong>. Their permitted actions will take effect immediately upon backend confirmation.
+                  <strong>{selectedUser.full_name || selectedUser.name}</strong>. Their permitted actions will take effect immediately upon backend confirmation.
                 </p>
               </div>
             )}

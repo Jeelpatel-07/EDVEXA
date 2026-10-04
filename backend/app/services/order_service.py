@@ -217,7 +217,20 @@ def process_order_payment(db: Session, order_id: str, org_id: str, payment_metho
     if order["expires_at"] and order["expires_at"] <= now:
         raise ValueError("Reservation expired; create a new order.")
 
-    # 1. Create Payment row
+    # 1. Normalize payment method to database payment_method_enum (CARD, ONLINE, CASH, UPI)
+    valid_methods = {"ONLINE", "CASH", "UPI", "CARD"}
+    method_map = {
+        "CAMPUS_CARD": "CARD",
+        "CAMPUS_PAY": "CARD",
+        "STRIPE_CARD": "CARD",
+        "DEMO_PAY": "ONLINE",
+        "MEMBER_BENEFIT": "CASH",
+    }
+    resolved_method = method_map.get(payment_method.upper(), payment_method.upper())
+    if resolved_method not in valid_methods:
+        resolved_method = "ONLINE"
+
+    # Create Payment row
     payment_id = str(uuid.uuid4())
     db.execute(
         text("""
@@ -229,8 +242,8 @@ def process_order_payment(db: Session, order_id: str, org_id: str, payment_metho
             "oid": org_id,
             "ord_id": order_id,
             "amt": order["total"],
-            "mthd": payment_method,
-            "pref": provider_ref or f"PAY_REF_{uuid.uuid4().hex[:10].upper()}",
+            "mthd": resolved_method,
+            "pref": provider_ref or f"PAY_{payment_method.upper()}_{uuid.uuid4().hex[:8].upper()}",
             "ikey": idem_key,
             "recby": recorded_by,
             "now": now

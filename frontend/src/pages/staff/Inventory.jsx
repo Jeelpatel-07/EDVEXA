@@ -5,6 +5,7 @@ import { Boxes, Plus, Minus, ArrowLeft, RefreshCw, Check } from "lucide-react";
 import PageHeader from "../../components/common/PageHeader";
 import Breadcrumbs from "../../components/common/Breadcrumbs";
 import LoadingState from "../../components/common/LoadingState";
+import ImageWithFallback from "../../components/common/ImageWithFallback";
 
 export default function Inventory() {
   const [products, setProducts] = useState([]);
@@ -65,17 +66,21 @@ export default function Inventory() {
             >
               <div className="flex items-center justify-between pb-3 border-b border-border">
                 <div className="flex items-center gap-3">
-                  <img
-                    src={product.image}
-                    alt={product.name}
-                    className="w-12 h-12 rounded-xl object-cover border border-border"
-                  />
+                  <div className="w-12 h-12 rounded-xl overflow-hidden border border-border shrink-0">
+                    <ImageWithFallback
+                      src={product.image || product.imageUrl || product.image_url}
+                      alt={product.name}
+                      category={product.category}
+                      containerClassName="relative w-full h-full bg-slate-100"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
                   <div>
                     <h3 className="font-bold text-sm text-foreground">
                       {product.name}
                     </h3>
                     <span className="text-xs text-muted-foreground">
-                      {product.category} • ${product.price.toFixed(2)}
+                      {product.category} • ₹{Number(product.price || 0).toLocaleString("en-IN")}
                     </span>
                   </div>
                 </div>

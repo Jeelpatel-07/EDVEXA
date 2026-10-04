@@ -43,6 +43,9 @@ export default function OrderDetail() {
     );
   }
 
+  const isMerch = order.type === "MERCHANDISE" || order.type === "MERCH" || order.order_type === "MERCH";
+  const totalAmount = Number(order.totalAmount ?? order.total ?? 0);
+
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <Breadcrumbs
@@ -64,14 +67,14 @@ export default function OrderDetail() {
           </div>
           <div className="flex items-center gap-2">
             <StatusBadge status={order.status} />
-            {order.pickupStatus !== "NOT_APPLICABLE" && (
+            {order.pickupStatus && order.pickupStatus !== "NOT_APPLICABLE" && (
               <StatusBadge status={order.pickupStatus} />
             )}
           </div>
         </div>
 
         {/* Pickup Verification Bar for Merch */}
-        {order.type === "MERCHANDISE" && (
+        {isMerch && (
           <div className="p-4 rounded-xl bg-teal-50 border border-teal-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-start gap-3">
               <Package className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
@@ -83,11 +86,11 @@ export default function OrderDetail() {
                   Location: {order.pickupLocation || "Student Organization Desk (Room 204)"}
                 </p>
                 <p className="text-[11px] text-teal-800 mt-1">
-                  Present this receipt to the merchandise manager to claim.
+                  Present this verified QR token to the merchandise manager to claim.
                 </p>
               </div>
             </div>
-            <div className="shrink-0 flex justify-center">
+            <div className="shrink-0 flex justify-center bg-white p-2 rounded-lg border border-teal-200">
               <QRCode value={`EDVEXA-PICKUP-${order.id}`} size={90} />
             </div>
           </div>
@@ -99,27 +102,33 @@ export default function OrderDetail() {
             Purchased Line Items
           </h3>
           <div className="border border-border rounded-xl overflow-hidden divide-y divide-border text-xs">
-            {order.items?.map((item, idx) => (
-              <div
-                key={idx}
-                className="p-3.5 flex items-center justify-between bg-slate-50/40"
-              >
-                <div>
-                  <span className="font-semibold text-foreground">{item.title}</span>
-                  {item.variant && (
+            {order.items?.map((item, idx) => {
+              const uPrice = Number(item.unitPrice || item.unit_price || 0);
+              const qty = Number(item.quantity || 1);
+              const sub = Number(item.subtotal || item.totalPrice || uPrice * qty);
+
+              return (
+                <div
+                  key={idx}
+                  className="p-3.5 flex items-center justify-between bg-slate-50/40"
+                >
+                  <div>
+                    <span className="font-semibold text-foreground">{item.title || item.name}</span>
+                    {(item.size || item.color || item.variant) && (
+                      <span className="text-muted-foreground block text-[11px]">
+                        Variant: {item.size || item.variant?.size || "Standard"} • {item.color || item.variant?.color || "Standard"}
+                      </span>
+                    )}
                     <span className="text-muted-foreground block text-[11px]">
-                      Variant: {item.variant.size} • {item.variant.color}
+                      Qty: {qty} × ₹{uPrice.toLocaleString("en-IN")}
                     </span>
-                  )}
-                  <span className="text-muted-foreground block text-[11px]">
-                    Qty: {item.quantity} × ${item.unitPrice.toFixed(2)}
+                  </div>
+                  <span className="font-bold text-foreground">
+                    ₹{sub.toLocaleString("en-IN")}
                   </span>
                 </div>
-                <span className="font-bold text-foreground">
-                  ${item.subtotal.toFixed(2)}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -128,23 +137,23 @@ export default function OrderDetail() {
           <div className="flex items-center justify-between text-muted-foreground">
             <span>Payment Method</span>
             <span className="font-mono text-foreground font-semibold">
-              {order.paymentMethod}
+              {order.payments?.[0]?.method || order.paymentMethod || "CAMPUS_CARD"}
             </span>
           </div>
           <div className="flex items-center justify-between text-muted-foreground">
             <span>Date & Timestamp</span>
-            <span>{new Date(order.createdAt).toLocaleString()}</span>
+            <span>{new Date(order.createdAt || order.created_at).toLocaleString()}</span>
           </div>
           {order.discountAmount > 0 && (
             <div className="flex items-center justify-between text-teal-700 font-semibold">
-              <span>Member Discount</span>
-              <span>-${order.discountAmount.toFixed(2)}</span>
+              <span>Member Discount Subsidized</span>
+              <span>-₹{Number(order.discountAmount).toLocaleString("en-IN")}</span>
             </div>
           )}
           <div className="flex items-center justify-between text-sm font-bold text-foreground pt-2 border-t border-border">
             <span>Authoritative Paid Amount</span>
             <span className="text-base text-teal-700 font-extrabold">
-              ${order.totalAmount.toFixed(2)}
+              ₹{totalAmount.toLocaleString("en-IN")}
             </span>
           </div>
         </div>
@@ -160,7 +169,7 @@ export default function OrderDetail() {
 
           <button
             onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-slate-700 hover:bg-slate-100"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
           >
             <Printer className="w-3.5 h-3.5" />
             <span>Print Receipt</span>

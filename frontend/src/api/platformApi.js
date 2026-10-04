@@ -30,7 +30,10 @@ export const platformApi = {
   },
 
   inviteOrgAdmin: async (adminData) => {
-    return await apiClient.post("/platform/admins", adminData);
+    const orgId = adminData.organization_id || adminData.orgId || adminData.id;
+    return await apiClient.post(`/platform/organizations/${orgId}/admins`, {
+      email: adminData.email,
+    });
   },
 
   getAuditLogs: async (params = {}) => {

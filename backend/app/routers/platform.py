@@ -10,7 +10,7 @@ from app.config import settings
 from app.deps import require_platform_admin
 from app.schemas.platform import (
     OrganizationCreate, OrganizationUpdate, OrgSuspendRequest,
-    OrgAdminInvite, PlatformSettingsUpdate
+    OrgAdminInvite, PlatformAdminDirectInvite, PlatformSettingsUpdate
 )
 from app.services.auth_service import hash_token, send_email_notification
 
@@ -345,6 +345,10 @@ def invite_org_admin(id: str, req: OrgAdminInvite, admin: dict = Depends(require
         "message": f"Invitation dispatched to {req.email}.",
         "invite_url": invite_url
     }
+
+@router.post("/admins", status_code=status.HTTP_201_CREATED)
+def invite_org_admin_direct(req: PlatformAdminDirectInvite, admin: dict = Depends(require_platform_admin), db: Session = Depends(get_db)):
+    return invite_org_admin(id=req.organization_id, req=OrgAdminInvite(email=req.email, full_name=req.full_name), admin=admin, db=db)
 
 @router.get("/audit-logs")
 def get_platform_audit_logs(admin: dict = Depends(require_platform_admin), db: Session = Depends(get_db)):

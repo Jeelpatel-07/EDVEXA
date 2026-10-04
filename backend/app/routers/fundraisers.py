@@ -121,100 +121,6 @@ def create_fundraiser(
     return {"message": "Fundraiser created successfully.", "id": f_id}
 
 
-@router.get("/{fundraiser_id}")
-def get_fundraiser(
-    fundraiser_id: str,
-    org_ctx: OrgContext = Depends(get_current_org_context),
-    db: Session = Depends(get_db)
-):
-    f = db.execute(
-        text("""
-            SELECT fp.*, f.description, f.budget_amount, f.status as fundraiser_status, u.full_name as lead_name
-            FROM v_fundraiser_progress fp
-            JOIN fundraisers f ON f.id = fp.fundraiser_id
-            LEFT JOIN users u ON u.id = f.lead_user_id
-            WHERE fp.fundraiser_id = :id AND fp.organization_id = :oid
-        """),
-        {"id": fundraiser_id, "oid": org_ctx.org_id}
-    ).mappings().first()
-
-    if not f:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fundraiser not found.")
-
-    tasks = db.execute(
-        text("""
-            SELECT t.*, 
-                   f.name as fundraiser_name, e.title as event_title,
-                   u_lead.full_name as lead_name, u_creator.full_name as creator_name,
-                   ARRAY_REMOVE(ARRAY_AGG(u.full_name), NULL) as assigned_names
-            FROM tasks t
-            LEFT JOIN fundraisers f ON f.id = t.fundraiser_id
-            LEFT JOIN events e ON e.id = t.event_id
-            LEFT JOIN users u_lead ON u_lead.id = f.lead_user_id
-            LEFT JOIN users u_creator ON u_creator.id = t.created_by
-            LEFT JOIN task_assignments ta ON ta.task_id = t.id
-            LEFT JOIN users u ON u.id = ta.user_id
-            WHERE t.fundraiser_id = :fid AND t.organization_id = :oid
-            GROUP BY t.id, f.name, e.title, u_lead.full_name, u_creator.full_name
-            ORDER BY t.created_at ASC
-        """),
-        {"fid": fundraiser_id, "oid": org_ctx.org_id}
-    ).mappings().all()
-
-    res = dict(f)
-    raised_pct = float(f.get("raised_pct") or 0.0)
-    goal_amt = float(f.get("goal_amount") or 0.0)
-    raised_amt = float(f.get("raised_amount") or 0.0)
-    budget_amt = float(f.get("budget_amount") or 0.0)
-    res.update({
-        "id": str(f["fundraiser_id"]),
-        "fundraiser_id": str(f["fundraiser_id"]),
-        "name": f["name"],
-        "title": f["name"],
-        "description": f.get("description") or "",
-        "goalAmount": goal_amt,
-        "goal_amount": goal_amt,
-        "raisedAmount": raised_amt,
-        "raised_amount": raised_amt,
-        "budgetAmount": budget_amt,
-        "budget_amount": budget_amt,
-        "progressPercent": raised_pct,
-        "progress_percent": raised_pct,
-        "raised_pct": raised_pct,
-        "completed_tasks": f.get("completed_tasks") or 0,
-        "total_tasks": f.get("total_tasks") or 0,
-        "task_done_pct": float(f.get("task_done_pct") or 0.0),
-        "leadName": f.get("lead_name") or "Campaign Director",
-        "lead_name": f.get("lead_name") or "Campaign Director",
-        "status": f.get("fundraiser_status") or "ACTIVE",
-        "tasks": [_format_task(t) for t in tasks]
-    })
-    return res
-
-
-@router.patch("/{fundraiser_id}")
-def update_fundraiser(
-    fundraiser_id: str,
-    req: FundraiserUpdate,
-    org_ctx: OrgContext = Depends(require_permission("fundraisers.manage")),
-    db: Session = Depends(get_db)
-):
-    now = datetime.now(timezone.utc)
-    clauses = []
-    params = {"id": fundraiser_id, "oid": org_ctx.org_id, "now": now}
-
-    for k, v in req.model_dump(exclude_unset=True).items():
-        clauses.append(f"{k} = :{k}")
-        params[k] = v
-
-    if clauses:
-        clauses.append("updated_at = :now")
-        db.execute(text(f"UPDATE fundraisers SET {', '.join(clauses)} WHERE id = :id AND organization_id = :oid"), params)
-        db.commit()
-
-    return {"message": "Fundraiser updated."}
-
-
 # ==========================================
 # TASKS ENDPOINTS (/orgs/{org_id}/tasks)
 # ==========================================
@@ -495,3 +401,113 @@ def add_task_comment(
     )
     db.commit()
     return {"message": "Comment added.", "id": comment_id}
+
+
+# ==========================================
+# SPECIFIC FUNDRAISER ENDPOINTS (/{fundraiser_id})
+# Registered after static /tasks routes to prevent route collisions
+# ==========================================
+
+@router.get("/{fundraiser_id}")
+def get_fundraiser(
+    fundraiser_id: str,
+    org_ctx: OrgContext = Depends(get_current_org_context),
+    db: Session = Depends(get_db)
+):
+    try:
+        uuid.UUID(fundraiser_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fundraiser not found.")
+
+    f = db.execute(
+        text("""
+            SELECT fp.*, f.description, f.budget_amount, f.status as fundraiser_status, u.full_name as lead_name
+            FROM v_fundraiser_progress fp
+            JOIN fundraisers f ON f.id = fp.fundraiser_id
+            LEFT JOIN users u ON u.id = f.lead_user_id
+            WHERE fp.fundraiser_id = :id AND fp.organization_id = :oid
+        """),
+        {"id": fundraiser_id, "oid": org_ctx.org_id}
+    ).mappings().first()
+
+    if not f:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fundraiser not found.")
+
+    tasks = db.execute(
+        text("""
+            SELECT t.*, 
+                   f.name as fundraiser_name, e.title as event_title,
+                   u_lead.full_name as lead_name, u_creator.full_name as creator_name,
+                   ARRAY_REMOVE(ARRAY_AGG(u.full_name), NULL) as assigned_names
+            FROM tasks t
+            LEFT JOIN fundraisers f ON f.id = t.fundraiser_id
+            LEFT JOIN events e ON e.id = t.event_id
+            LEFT JOIN users u_lead ON u_lead.id = f.lead_user_id
+            LEFT JOIN users u_creator ON u_creator.id = t.created_by
+            LEFT JOIN task_assignments ta ON ta.task_id = t.id
+            LEFT JOIN users u ON u.id = ta.user_id
+            WHERE t.fundraiser_id = :fid AND t.organization_id = :oid
+            GROUP BY t.id, f.name, e.title, u_lead.full_name, u_creator.full_name
+            ORDER BY t.created_at ASC
+        """),
+        {"fid": fundraiser_id, "oid": org_ctx.org_id}
+    ).mappings().all()
+
+    res = dict(f)
+    raised_pct = float(f.get("raised_pct") or 0.0)
+    goal_amt = float(f.get("goal_amount") or 0.0)
+    raised_amt = float(f.get("raised_amount") or 0.0)
+    budget_amt = float(f.get("budget_amount") or 0.0)
+    res.update({
+        "id": str(f["fundraiser_id"]),
+        "fundraiser_id": str(f["fundraiser_id"]),
+        "name": f["name"],
+        "title": f["name"],
+        "description": f.get("description") or "",
+        "goalAmount": goal_amt,
+        "goal_amount": goal_amt,
+        "raisedAmount": raised_amt,
+        "raised_amount": raised_amt,
+        "budgetAmount": budget_amt,
+        "budget_amount": budget_amt,
+        "progressPercent": raised_pct,
+        "progress_percent": raised_pct,
+        "raised_pct": raised_pct,
+        "completed_tasks": f.get("completed_tasks") or 0,
+        "total_tasks": f.get("total_tasks") or 0,
+        "task_done_pct": float(f.get("task_done_pct") or 0.0),
+        "leadName": f.get("lead_name") or "Campaign Director",
+        "lead_name": f.get("lead_name") or "Campaign Director",
+        "status": f.get("fundraiser_status") or "ACTIVE",
+        "tasks": [_format_task(t) for t in tasks]
+    })
+    return res
+
+
+@router.patch("/{fundraiser_id}")
+def update_fundraiser(
+    fundraiser_id: str,
+    req: FundraiserUpdate,
+    org_ctx: OrgContext = Depends(require_permission("fundraisers.manage")),
+    db: Session = Depends(get_db)
+):
+    try:
+        uuid.UUID(fundraiser_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fundraiser not found.")
+
+    now = datetime.now(timezone.utc)
+    clauses = []
+    params = {"id": fundraiser_id, "oid": org_ctx.org_id, "now": now}
+
+    for k, v in req.model_dump(exclude_unset=True).items():
+        clauses.append(f"{k} = :{k}")
+        params[k] = v
+
+    if clauses:
+        clauses.append("updated_at = :now")
+        db.execute(text(f"UPDATE fundraisers SET {', '.join(clauses)} WHERE id = :id AND organization_id = :oid"), params)
+        db.commit()
+
+    return {"message": "Fundraiser updated."}
+

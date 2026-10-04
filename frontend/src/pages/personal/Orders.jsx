@@ -60,7 +60,7 @@ export default function Orders() {
       accessor: "totalAmount",
       render: (row) => (
         <span className="font-bold text-xs text-foreground">
-          ${row.totalAmount.toFixed(2)}
+          ₹{Number(row.totalAmount ?? row.total ?? 0).toLocaleString("en-IN")}
         </span>
       ),
     },
@@ -105,8 +105,10 @@ export default function Orders() {
       ) : orders.length === 0 ? (
         <EmptyState
           icon={Receipt}
-          title="No orders placed yet"
-          description="Your merchandise purchases and event orders will appear here."
+          title="No orders yet."
+          description="Your merchandise purchases will appear here."
+          actionLabel="Browse Merchandise"
+          actionLink="/app/shop"
         />
       ) : (
         <DataTable columns={columns} data={orders} pageSize={8} />

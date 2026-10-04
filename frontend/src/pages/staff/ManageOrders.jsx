@@ -101,7 +101,7 @@ export default function ManageOrders() {
         const amt = row.totalAmount != null ? Number(row.totalAmount) : Number(row.total || 0);
         return (
           <span className="font-bold text-xs text-foreground">
-            ${isNaN(amt) ? "0.00" : amt.toFixed(2)}
+            ₹{isNaN(amt) ? "0.00" : amt.toLocaleString("en-IN")}
           </span>
         );
       },

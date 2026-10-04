@@ -49,7 +49,7 @@ export default function Sidebar({ onCloseMobile }) {
     { label: "Membership", to: "/app/membership", icon: CreditCard },
     { label: "Events", to: "/events", icon: Calendar },
     { label: "My Tickets", to: "/app/tickets", icon: Ticket },
-    { label: "Shop", to: "/app/shop", icon: ShoppingBag },
+    { label: "Merchandise", to: "/app/shop", icon: ShoppingBag },
     {
       label: "Cart",
       to: "/app/cart",
@@ -188,9 +188,11 @@ export default function Sidebar({ onCloseMobile }) {
           to="/"
           className="flex items-center gap-2.5 font-bold text-lg text-foreground hover:opacity-90"
         >
-          <div className="w-8 h-8 rounded-lg bg-teal-600 flex items-center justify-center text-white font-black text-base shadow-xs">
-            E
-          </div>
+          <img
+            src="/logo.png"
+            alt="EDVEXA Logo"
+            className="w-9 h-9 rounded-xl object-contain bg-white shadow-2xs border border-border/40 p-0.5"
+          />
           <div className="flex flex-col">
             <span className="leading-tight tracking-tight text-foreground font-extrabold text-base">
               EDVEXA
@@ -263,8 +265,10 @@ export default function Sidebar({ onCloseMobile }) {
           const Icon = item.icon;
           const isActive =
             location.pathname === item.to ||
+            (item.to === "/app/shop" && (location.pathname.startsWith("/app/shop") || location.pathname.startsWith("/app/merchandise"))) ||
             (item.to !== "/app/dashboard" &&
               item.to !== "/app/manage" &&
+              item.to !== "/app/shop" &&
               location.pathname.startsWith(item.to));
 
           return (

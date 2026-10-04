@@ -97,6 +97,11 @@ export default function Register() {
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4 sm:p-6 bg-slate-50/50">
       <div className="w-full max-w-md bg-card rounded-2xl border border-border p-6 sm:p-8 shadow-sm">
         <div className="text-center mb-6">
+          <img
+            src="/logo.png"
+            alt="EDVEXA Logo"
+            className="w-16 h-16 rounded-2xl object-contain mx-auto mb-3 shadow-sm bg-white border border-border/40 p-1"
+          />
           <h1 className="text-2xl font-bold text-foreground tracking-tight">
             Register on EDVEXA
           </h1>

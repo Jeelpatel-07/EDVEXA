@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.db import get_db
-from app.deps import get_current_org_context, require_permission, OrgContext
+from app.deps import get_current_org_context, require_permission, OrgContext, get_current_user
 from app.schemas.org import MembershipPlanCreate, MembershipPlanUpdate, ManualMembershipRequest
 from app.services.order_service import create_order, process_order_payment
 
@@ -210,8 +210,10 @@ def list_members(
     return results
 
 @router.post("/members/manual")
+@router.post("/manual")
 def manual_membership_entry(
     req: ManualMembershipRequest,
+    current_user: dict = Depends(get_current_user),
     org_ctx: OrgContext = Depends(require_permission("members.manage")),
     db: Session = Depends(get_db)
 ):
@@ -230,7 +232,7 @@ def manual_membership_entry(
         org_id=org_ctx.org_id,
         payment_method=req.payment_method,
         provider_ref=f"MANUAL_CASH_RECEIPT_{secrets.token_hex(4).upper()}",
-        recorded_by=org_ctx.org_id
+        recorded_by=current_user["id"]
     )
 
     return {"message": "Membership successfully granted and dues recorded in ledger.", "order": paid_order}
